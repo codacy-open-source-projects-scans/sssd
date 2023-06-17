@@ -749,6 +749,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier1_2
+    @pytest.mark.c_ares
     def test_0009_ad_parameters_ldap_sasl_full(
             multihost, create_aduser_group):
         """
@@ -833,6 +834,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier2
+    @pytest.mark.c_ares
     def test_0010_ad_parameters_ldap_sasl_short(
             multihost, create_aduser_group):
         """
@@ -919,6 +921,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier1_2
+    @pytest.mark.c_ares
     def test_0011_ad_parameters_server_resolvable(
             multihost, adjoin, create_aduser_group):
         """
@@ -998,6 +1001,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier2
+    @pytest.mark.c_ares
     def test_0012_ad_parameters_server_unresolvable(
             multihost, adjoin, create_aduser_group):
         """
@@ -1051,6 +1055,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier1_2
+    @pytest.mark.c_ares
     def test_0013_ad_parameters_server_srv_record(
             multihost, adjoin, create_aduser_group):
         """
@@ -1110,6 +1115,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier1_2
+    @pytest.mark.c_ares
     def test_0014_ad_parameters_server_blank(
             multihost, adjoin, create_aduser_group):
         """
@@ -1196,7 +1202,7 @@ class TestADParamsPorted:
         arch = multihost.client[0].run_command(
             'uname -m', raiseonerr=False).stdout_text
         if 'x86_64' not in arch:
-            pytest.skip("Test is unstable on architectures other than x68_64.")
+            pytest.skip("Test is unstable on architectures other than x86_64.")
 
         adjoin(membersw='adcli')
         client = sssdTools(multihost.client[0], multihost.ad[0])
@@ -1250,13 +1256,15 @@ class TestADParamsPorted:
             f'hostname {old_hostname}', raiseonerr=False)
 
         # Evaluate test results
-        assert "Setting ad_hostname to [host1.kautest.com]" in log_str
-        assert f"Will look for host1.kautest.com@{ad_realm}" in log_str
         assert usr_cmd.returncode == 0, f"User {aduser} was not found."
         assert su_result, "The su command failed!"
+        assert "Setting ad_hostname to [host1.kautest.com]" in log_str
+        assert f"Will look for host1.kautest.com@{ad_realm}" in log_str
+
 
     @staticmethod
     @pytest.mark.tier1_2
+    @pytest.mark.c_ares
     def test_0016_ad_parameters_ad_hostname_valid(
             multihost, adjoin, create_aduser_group):
         """
@@ -1286,6 +1294,10 @@ class TestADParamsPorted:
           1. Remove AD user.
         :customerscenario: False
         """
+        arch = multihost.client[0].run_command(
+            'uname -m', raiseonerr=False).stdout_text
+        if 'x86_64' not in arch:
+            pytest.skip("Test is unstable on architectures other than x86_64.")
         adjoin(membersw='adcli')
         client = sssdTools(multihost.client[0], multihost.ad[0])
 
@@ -1334,13 +1346,13 @@ class TestADParamsPorted:
         multihost.client[0].run_command(
             f'hostname {old_hostname}', raiseonerr=False)
         # Evaluate test results
+        assert usr_cmd.returncode == 0, f"User {aduser} was not found."
+        assert grp_cmd.returncode == 0, f"Group {adgroup} was not found!"
+        assert su_result, "The su command failed!"
         assert f"Option ad_hostname has value {old_hostname}" in log_str
         assert f"Setting ad_hostname to [{old_hostname}]" not in log_str
         assert f"Will look for {old_hostname}@{ad_realm}" in log_str
         assert f"Trying to find principal {old_hostname}@{ad_realm}" in log_str
-        assert usr_cmd.returncode == 0, f"User {aduser} was not found."
-        assert grp_cmd.returncode == 0, f"Group {adgroup} was not found!"
-        assert su_result, "The su command failed!"
 
     @staticmethod
     @pytest.mark.tier2
@@ -2045,6 +2057,7 @@ class TestADParamsPorted:
 
     @staticmethod
     @pytest.mark.tier2
+    @pytest.mark.c_ares
     def test_0026_ad_parameters_dns_failover(
             multihost, adjoin, create_plain_aduser_group):
         """
