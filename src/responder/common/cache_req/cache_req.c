@@ -702,7 +702,6 @@ struct cache_req_search_domains_state {
     bool check_next;
     bool dp_success;
     bool first_iteration;
-    enum cache_req_behavior cache_behavior;
 };
 
 static errno_t cache_req_search_domains_next(struct tevent_req *req);
@@ -712,6 +711,26 @@ static errno_t cache_req_handle_result(struct tevent_req *req,
 static void cache_req_search_domains_locate_done(struct tevent_req *subreq);
 
 static void cache_req_search_domains_done(struct tevent_req *subreq);
+
+static bool
+cache_req_dp_contacted(struct cache_req_search_domains_state *state)
+{
+    switch (state->cr->cache_behavior) {
+        case CACHE_REQ_CACHE_FIRST:
+            if (state->first_iteration) {
+                /* This is the first iteration so provider was bypassed. */
+                return false;
+            }
+
+            /* This is the second iteration so the provider was contacted. */
+            return true;
+        case CACHE_REQ_BYPASS_PROVIDER:
+            return false;
+        default:
+            /* Other schemas talks to provider immediately. */
+            return true;
+    }
+}
 
 struct tevent_req *
 cache_req_search_domains_send(TALLOC_CTX *mem_ctx,
@@ -868,7 +887,7 @@ static errno_t cache_req_search_domains_next(struct tevent_req *req)
      * requests succeeded because only then we can be sure that it does
      * not exist-
      */
-    if (state->dp_success) {
+    if (cache_req_dp_contacted(state) && state->dp_success) {
         cache_req_global_ncache_add(cr);
     }
 
@@ -972,8 +991,10 @@ static void cache_req_search_domains_done(struct tevent_req *subreq)
     ret = cache_req_search_recv(state, subreq, &result, &dp_success);
     talloc_zfree(subreq);
 
-    /* Remember if any DP request fails. */
-    state->dp_success = !dp_success ? false : state->dp_success;
+    /* Remember if any DP request fails, if DP was contacted. */
+    if (cache_req_dp_contacted(state)) {
+        state->dp_success = !dp_success ? false : state->dp_success;
+    }
 
     switch (ret) {
     case EOK:
@@ -985,7 +1006,9 @@ static void cache_req_search_domains_done(struct tevent_req *subreq)
     case ERR_ID_OUTSIDE_RANGE:
     case ENOENT:
         if (state->check_next == false) {
-            if (state->cr->data->propogate_offline_status && !state->dp_success) {
+             if (cache_req_dp_contacted(state)
+                 && !state->dp_success
+                 && state->cr->data->propogate_offline_status) {
                 /* Not found and data provider request failed so we were
                  * unable to fetch the data. */
                 ret = ERR_OFFLINE;
@@ -1020,8 +1043,10 @@ done:
     case EAGAIN:
         break;
     default:
-        if (ret == ENOENT && state->cr->data->propogate_offline_status
-                && !state->dp_success) {
+        if (cache_req_dp_contacted(state)
+            && ret == ENOENT
+            && !state->dp_success
+            && state->cr->data->propogate_offline_status) {
             /* Not found and data provider request failed so we were
              * unable to fetch the data. */
             ret = ERR_OFFLINE;
