@@ -1400,6 +1400,9 @@ done:
         /* FIXME: should we krb5_cc_destroy in case of error? */
         krb5_cc_close(kctx, kcc);
     }
+
+    krb5_free_context(kctx);
+
     return kerr;
 }
 
@@ -1851,6 +1854,7 @@ static krb5_error_code validate_tgt(struct krb5_req *kr)
     if (kerr != 0) {
         DEBUG(SSSDBG_CRIT_FAILURE, "error reading keytab [%s], " \
                                     "not verifying TGT.\n", kr->keytab);
+        krb5_kt_close(kr->ctx, keytab);
         return kerr;
     }
 
@@ -1865,6 +1869,7 @@ static krb5_error_code validate_tgt(struct krb5_req *kr)
                                    &validation_princ);
         if (kerr != 0) {
             DEBUG(SSSDBG_CRIT_FAILURE, "krb5_copy_principal failed.\n");
+            krb5_kt_end_seq_get(kr->ctx, keytab, &cursor);
             goto done;
         }
 

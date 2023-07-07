@@ -637,12 +637,12 @@ errno_t get_ccache_file_data(const char *ccache_file, const char *client_name,
     krb5_free_cred_contents(ctx, &cred);
 
     kerr = krb5_cc_close(ctx, cc);
+    cc = NULL;
     if (kerr != 0) {
         KRB5_DEBUG(SSSDBG_OP_FAILURE, ctx, kerr);
         DEBUG(SSSDBG_CRIT_FAILURE, "krb5_cc_close failed.\n");
         goto done;
     }
-    cc = NULL;
 
     kerr = 0;
 
@@ -781,14 +781,14 @@ done:
         talloc_free(mem_name);
     }
 
-    free(ccache_name);
+    krb5_free_string(kctx, ccache_name);
     krb5_free_principal(kctx, princ);
 
     if (krb5_cc_close(kctx, ccache) != 0) {
         DEBUG(SSSDBG_OP_FAILURE, "krb5_cc_close failed.\n");
     }
 
-    if (krb5_cc_close(kctx, mem_ccache) != 0) {
+    if ((mem_ccache != NULL) && (krb5_cc_close(kctx, mem_ccache) != 0)) {
         DEBUG(SSSDBG_OP_FAILURE, "krb5_cc_close failed.\n");
     }
 
