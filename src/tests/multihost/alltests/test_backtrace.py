@@ -13,7 +13,7 @@ import re
 import time
 import pytest
 from sssd.testlib.common.utils import sssdTools
-from sssd.testlib.common.expect import pexpect_ssh
+from sssd.testlib.common.ssh2_python import check_login_client
 from constants import ds_instance_name
 
 
@@ -34,18 +34,16 @@ def no_fallback_dir(multihost):
     tools.clear_sssd_cache()
     user = f'foo1@{ds_instance_name}'
     # Authenticate user
-    client = pexpect_ssh(multihost.client[0].sys_hostname, user,
-                         'Secret123', debug=False)
-    client.login(login_timeout=30, sync_multiplier=5,
-                 auto_prompt_reset=False)
+    check_login_client(multihost, user, 'Secret123')
 
 
 @pytest.mark.usefixtures('setup_sssd', 'create_posix_usersgroups')
 @pytest.mark.backtrace
-@pytest.mark.tier1_2
 class TestPoorManBacktrace(object):
     """ Check sssd backtrace feature """
-    def test_0001_bz2021196(self, multihost, backupsssdconf):
+    @staticmethod
+    @pytest.mark.tier2
+    def test_0001_bz2021196(multihost, backupsssdconf):
         """
         :title: avoid duplicate backtraces
         :id: d4d8a0a0-ab90-4c8f-8087-95dc7ad3f3ae
@@ -112,7 +110,9 @@ class TestPoorManBacktrace(object):
         # backtrace is skipped
         assert pattern2.search(log_str2) and not pattern.search(log_str2)
 
-    def test_0002_bz1949149(self, multihost, backupsssdconf):
+    @staticmethod
+    @pytest.mark.tier1_2
+    def test_0002_bz1949149(multihost, backupsssdconf):
         """
         :title: backtrace is disabled if debug level >= 9
         :id: 50f2d501-3296-4229-86a0-b81844381637
@@ -153,7 +153,9 @@ class TestPoorManBacktrace(object):
             find = re.compile(r'BACKTRACE DUMP ENDS HERE')
             assert not find.search(log_str)
 
-    def test_0003_bz1949149(self, multihost, backupsssdconf):
+    @staticmethod
+    @pytest.mark.tier1_2
+    def test_0003_bz1949149(multihost, backupsssdconf):
         """
         :title: set debug_backtrace_enabled false
         :id: b8084e03-5e21-45ee-a463-65ab537fa110
@@ -193,7 +195,9 @@ class TestPoorManBacktrace(object):
             find = re.compile(r'BACKTRACE DUMP ENDS HERE')
             assert not find.search(log_str)
 
-    def test_0004_bz1949149(self, multihost, backupsssdconf):
+    @staticmethod
+    @pytest.mark.tier1_2
+    def test_0004_bz1949149(multihost, backupsssdconf):
         """
         :title: backtrace level is 0 with debug level set to 0
         :id: 4376d596-a613-447c-8f85-e3f3fbc05728
@@ -237,7 +241,9 @@ class TestPoorManBacktrace(object):
                     log_level = log_lines[index - 1]
                     assert find2.search(log_level)
 
-    def test_0005_bz1949149(self, multihost, backupsssdconf):
+    @staticmethod
+    @pytest.mark.tier1_2
+    def test_0005_bz1949149(multihost, backupsssdconf):
         """
         :title: backtrace level is 1 with debug level set to 1
         :id: 8a8adcdd-63bc-4a64-83cd-5c7b76fe745a
