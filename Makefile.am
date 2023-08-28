@@ -91,9 +91,8 @@ deskprofilepath = $(sss_statedir)/deskprofile
 
 if HAVE_SYSTEMD_UNIT
 ifp_dbus_exec_comment = \# If system is configured to use systemd ifp service ("SystemdService=") then "Exec=" and "User=" options are not used
-ifp_exec_cmd = $(sssdlibexecdir)/sssd_ifp --uid 0 --gid 0 --dbus-activated
+ifp_dbus_exec_cmd = $(sssdlibexecdir)/sssd_ifp --dbus-activated
 ifp_systemdservice = SystemdService=sssd-ifp.service
-ifp_restart = Restart=on-failure
 # SSSD requires a configuration file (either /etc/sssd/sssd.conf,
 # or some snippet under /etc/sssd/sssd.conf.d/) to be present.
 condconfigexists = ConditionPathExists=\|/etc/sssd/sssd.conf\nConditionDirectoryNotEmpty=\|/etc/sssd/conf.d/
@@ -107,9 +106,8 @@ additional_caps = CAP_DAC_OVERRIDE
 endif
 else
 ifp_dbus_exec_comment = \# "sss_signal" is used to force SSSD monitor to trigger "sssd_ifp" reconnection to dbus
-ifp_exec_cmd = $(sssdlibexecdir)/sss_signal
+ifp_dbus_exec_cmd = $(sssdlibexecdir)/sss_signal
 ifp_systemdservice =
-ifp_restart =
 endif
 
 secdbpath = @secdbpath@
@@ -120,6 +118,12 @@ MKDIR_P = @MKDIR_P@
 INSTALL = @INSTALL@
 
 SSSD_USER = @SSSD_USER@
+
+if SSSD_NON_ROOT_USER
+ifp_non_root_owner_policy =  <policy user="$(SSSD_USER)"> <allow own="org.freedesktop.sssd.infopipe"/> </policy>
+else
+ifp_non_root_owner_policy =
+endif
 
 
 AM_CFLAGS =
@@ -1319,7 +1323,9 @@ endif
 if BUILD_SYSTEMTAP
 libsss_util_la_LIBADD += stap_generated_probes.lo
 endif
+if BUILD_PASSKEY
 libsss_util_la_SOURCES += src/db/sysdb_passkey_user_verification.c
+endif # BUILD_PASSKEY
 libsss_util_la_LDFLAGS = -avoid-version
 
 pkglib_LTLIBRARIES += libsss_semanage.la
@@ -1562,8 +1568,10 @@ sssd_pam_SOURCES = \
     src/responder/pam/pam_prompting_config.c \
     src/sss_client/pam_sss_prompt_config.c \
     src/responder/pam/pam_helpers.c \
-    src/responder/pam/pamsrv_passkey.c \
     $(SSSD_RESPONDER_OBJ)
+if BUILD_PASSKEY
+    sssd_pam_SOURCES += src/responder/pam/pamsrv_passkey.c
+endif
 sssd_pam_CFLAGS = \
     $(AM_CFLAGS) \
     $(GSSAPI_KRB5_CFLAGS) \
@@ -1744,13 +1752,14 @@ dist_dbusservice_DATA = \
 
 EXTRA_DIST += \
     src/responder/ifp/org.freedesktop.sssd.infopipe.service.in \
+    src/responder/ifp/org.freedesktop.sssd.infopipe.conf.in \
     $(NULL)
 
 ifp_edit_cmd = $(edit_cmd) \
-        -e 's|@ifp_exec_cmd[@]|$(ifp_exec_cmd)|g' \
+        -e 's|@ifp_non_root_owner_policy[@]|$(ifp_non_root_owner_policy)|g' \
+        -e 's|@ifp_dbus_exec_cmd[@]|$(ifp_dbus_exec_cmd)|g' \
         -e 's|@ifp_dbus_exec_comment[@]|$(ifp_dbus_exec_comment)|g' \
-        -e 's|@ifp_systemdservice[@]|$(ifp_systemdservice)|g' \
-        -e 's|@ifp_restart[@]|$(ifp_restart)|g'
+        -e 's|@ifp_systemdservice[@]|$(ifp_systemdservice)|g'
 
 ifp_replace_script = \
     @rm -f $@ $@.tmp; \
@@ -1761,6 +1770,10 @@ ifp_replace_script = \
 
 src/responder/ifp/org.freedesktop.sssd.infopipe.service: src/responder/ifp/org.freedesktop.sssd.infopipe.service.in Makefile
 	$(ifp_replace_script)
+
+src/responder/ifp/org.freedesktop.sssd.infopipe.conf: src/responder/ifp/org.freedesktop.sssd.infopipe.conf.in Makefile
+	$(ifp_replace_script)
+
 
 endif
 
@@ -2621,7 +2634,6 @@ pam_srv_tests_SOURCES = \
     src/responder/pam/pamsrv_cmd.c \
     src/responder/pam/pamsrv_p11.c \
     src/responder/pam/pamsrv_gssapi.c \
-    src/responder/pam/pamsrv_passkey.c \
     src/responder/pam/pam_helpers.c \
     src/responder/pam/pamsrv_dp.c \
     src/responder/pam/pam_prompting_config.c \
@@ -2655,6 +2667,9 @@ pam_srv_tests_LDADD = \
     libsss_iface.la \
     libsss_sbus.la \
     $(NULL)
+if BUILD_PASSKEY
+     pam_srv_tests_SOURCES += src/responder/pam/pamsrv_passkey.c
+endif # BUILD_PASSKEY
 
 EXTRA_ssh_srv_tests_DEPENDENCIES = \
     $(ldblib_LTLIBRARIES) \
@@ -4575,9 +4590,10 @@ if BUILD_SSH
 libsss_ipa_la_SOURCES += src/providers/ipa/ipa_hostid.c
 endif
 
+if BUILD_PASSKEY
 libsss_ipa_la_SOURCES += \
     src/providers/ipa/ipa_subdomains_passkey.c
-
+endif # BUILD_PASSKEY
 
 libsss_ad_la_SOURCES = \
     src/providers/ad/ad_opts.c \
@@ -4660,8 +4676,10 @@ krb5_child_SOURCES = \
     src/sss_client/common.c \
     src/krb5_plugin/common/utils.c \
     src/krb5_plugin/idp/idp_utils.c \
-    src/krb5_plugin/passkey/passkey_utils.c \
     $(NULL)
+if BUILD_PASSKEY
+    krb5_child_SOURCES += src/krb5_plugin/passkey/passkey_utils.c
+endif # BUILD_PASSKEY
 krb5_child_CFLAGS = \
     $(AM_CFLAGS) \
     $(POPT_CFLAGS) \
@@ -5592,6 +5610,7 @@ endif
 	done;
 	rm -Rf ldb_mod_test_dir
 	rm -f $(builddir)/src/responder/ifp/org.freedesktop.sssd.infopipe.service
+	rm -f $(builddir)/src/responder/ifp/org.freedesktop.sssd.infopipe.conf
 	rm -f $(builddir)/src/sysv/systemd/sssd.service
 	rm -f $(builddir)/src/sysv/systemd/sssd-autofs.socket
 	rm -f $(builddir)/src/sysv/systemd/sssd-autofs.service
