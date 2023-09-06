@@ -93,6 +93,7 @@ struct err_string error_to_str[] = {
     { "p11_child timeout" }, /* ERR_P11_CHILD_TIMEOUT */
     { "PIN locked" }, /* ERR_P11_PIN_LOCKED */
     { "passkey_child failed" }, /* ERR_PASSKEY_CHILD */
+    { "passkey_child timeout" }, /* ERR_PASSKEY_CHILD_TIMEOUT */
     { "Address family not supported" }, /* ERR_ADDR_FAMILY_NOT_SUPPORTED */
     { "Message sender is the bus" }, /* ERR_SBUS_SENDER_BUS */
     { "Subdomain is inactive" }, /* ERR_SUBDOM_INACTIVE */
@@ -144,10 +145,11 @@ struct err_string error_to_str[] = {
     { "No reply was received" }, /* ERR_SBUS_NO_REPLY */
 
     /* ini parsing errors */
-    { "Failed to open configuration" }, /* ERR_INI_OPEN_FAILED */
+    { "Failed to open main config file" }, /* ERR_INI_OPEN_FAILED */
     { "File ownership and permissions check failed" }, /* ERR_INI_INVALID_PERMISSION */
     { "Error while parsing configuration file" }, /* ERR_INI_PARSE_FAILED */
     { "Failed to add configuration snippets" }, /* ERR_INI_ADD_SNIPPETS_FAILED */
+    { "Neither main config nor config snippets exist" }, /* ERR_INI_EMPTY_CONFIG */
 
     { "TLS handshake was interrupted"}, /* ERR_TLS_HANDSHAKE_INTERRUPTED */
 

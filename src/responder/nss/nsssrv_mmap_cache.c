@@ -722,6 +722,57 @@ static errno_t sss_mmap_cache_invalidate(struct sss_mc_ctx *mcc,
     return EOK;
 }
 
+static errno_t sss_mmap_cache_validate_or_reinit(struct sss_mc_ctx **_mcc)
+{
+    struct sss_mc_ctx *mcc = *_mcc;
+    struct stat fdstat;
+    bool reinit = false;
+    errno_t ret;
+
+    /* No mcc initialized? Memory cache may be disabled. */
+    if (mcc == NULL || mcc->fd < 0) {
+        ret = EINVAL;
+        reinit = false;
+        goto done;
+    }
+
+    if (fstat(mcc->fd, &fdstat) == -1) {
+        ret = errno;
+        DEBUG(SSSDBG_CRIT_FAILURE,
+            "Unable to stat memory cache [file=%s, fd=%d] [%d]: %s\n",
+            mcc->file, mcc->fd, ret, sss_strerror(ret));
+        reinit = true;
+        goto done;
+    }
+
+    if (fdstat.st_nlink == 0) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Memory cache file was removed\n");
+        ret = ENOENT;
+        reinit = true;
+        goto done;
+    }
+
+    if (fdstat.st_size != mcc->mmap_size) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+            "Memory cache is corrupted, invalid size [file=%s, fd=%d, "
+            "expected_size=%zu, real_size=%zu]\n",
+            mcc->file, mcc->fd, mcc->mmap_size, fdstat.st_size);
+        ret = EINVAL;
+        reinit = true;
+        goto done;
+    }
+
+    ret = EOK;
+    reinit = false;
+
+done:
+    if (reinit) {
+        return sss_mmap_cache_reinit(talloc_parent(mcc), -1, -1, -1, -1, _mcc);
+    }
+
+    return ret;
+}
+
 /***************************************************************************
  * passwd map
  ***************************************************************************/
@@ -744,9 +795,9 @@ errno_t sss_mmap_cache_pw_store(struct sss_mc_ctx **_mcc,
     size_t pos;
     int ret;
 
-    if (mcc == NULL) {
-        /* cache not initialized? */
-        return EINVAL;
+    ret = sss_mmap_cache_validate_or_reinit(&mcc);
+    if (ret != EOK) {
+        return ret;
     }
 
     ret = snprintf(uidstr, 11, "%ld", (long)uid);
@@ -815,9 +866,9 @@ errno_t sss_mmap_cache_pw_invalidate_uid(struct sss_mc_ctx *mcc, uid_t uid)
     char *uidstr;
     errno_t ret;
 
-    if (mcc == NULL) {
-        /* cache not initialized? */
-        return EINVAL;
+    ret = sss_mmap_cache_validate_or_reinit(&mcc);
+    if (ret != EOK) {
+        return ret;
     }
 
     uidstr = talloc_asprintf(NULL, "%ld", (long)uid);
@@ -886,9 +937,9 @@ int sss_mmap_cache_gr_store(struct sss_mc_ctx **_mcc,
     size_t pos;
     int ret;
 
-    if (mcc == NULL) {
-        /* cache not initialized? */
-        return EINVAL;
+    ret = sss_mmap_cache_validate_or_reinit(&mcc);
+    if (ret != EOK) {
+        return ret;
     }
 
     ret = snprintf(gidstr, 11, "%ld", (long)gid);
@@ -953,9 +1004,9 @@ errno_t sss_mmap_cache_gr_invalidate_gid(struct sss_mc_ctx *mcc, gid_t gid)
     char *gidstr;
     errno_t ret;
 
-    if (mcc == NULL) {
-        /* cache not initialized? */
-        return EINVAL;
+    ret = sss_mmap_cache_validate_or_reinit(&mcc);
+    if (ret != EOK) {
+        return ret;
     }
 
     gidstr = talloc_asprintf(NULL, "%ld", (long)gid);
@@ -1018,9 +1069,9 @@ errno_t sss_mmap_cache_initgr_store(struct sss_mc_ctx **_mcc,
     size_t pos;
     int ret;
 
-    if (mcc == NULL) {
-        /* cache not initialized? */
-        return EINVAL;
+    ret = sss_mmap_cache_validate_or_reinit(&mcc);
+    if (ret != EOK) {
+        return ret;
     }
 
     /* array of gids + name + unique_name */
@@ -1087,8 +1138,9 @@ errno_t sss_mmap_cache_sid_store(struct sss_mc_ctx **_mcc,
     size_t rec_len;
     int ret;
 
-    if (mcc == NULL) {
-        return EINVAL;
+    ret = sss_mmap_cache_validate_or_reinit(&mcc);
+    if (ret != EOK) {
+        return ret;
     }
 
     ret = snprintf(idkey, sizeof(idkey), "%d-%ld",
@@ -1206,11 +1258,11 @@ static errno_t sss_mc_create_file(struct sss_mc_ctx *mc_ctx)
     int ret, uret;
 
     /* temporarily relax umask as we need the file to be readable
-     * by everyone for now */
-    old_mask = umask(0022);
+     * by everyone and writeable by group */
+    old_mask = umask(0002);
 
     errno = 0;
-    mc_ctx->fd = open(mc_ctx->file, O_CREAT | O_EXCL | O_RDWR, 0644);
+    mc_ctx->fd = open(mc_ctx->file, O_CREAT | O_EXCL | O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
     umask(old_mask);
     if (mc_ctx->fd == -1) {
         ret = errno;
@@ -1223,20 +1275,14 @@ static errno_t sss_mc_create_file(struct sss_mc_ctx *mc_ctx)
      * if the nss responder runs as root. This is because the specfile
      * has the ownership recorded as sssd.sssd
      */
-    ret = fchown(mc_ctx->fd, mc_ctx->uid, mc_ctx->gid);
-    if (ret != 0) {
-        ret = errno;
-        DEBUG(SSSDBG_CRIT_FAILURE, "Failed to chown mmap file %s: %d(%s)\n",
-                                   mc_ctx->file, ret, strerror(ret));
-        return ret;
-    }
-
-    ret = fchmod(mc_ctx->fd, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
-    if (ret == -1) {
-        ret = errno;
-        DEBUG(SSSDBG_CRIT_FAILURE, "Failed to chmod mmap file %s: %d(%s)\n",
-                                   mc_ctx->file, ret, strerror(ret));
-        return ret;
+    if ((getuid() == 0) || (geteuid() == 0)) {
+        ret = fchown(mc_ctx->fd, mc_ctx->uid, mc_ctx->gid);
+        if (ret != 0) {
+            ret = errno;
+            DEBUG(SSSDBG_CRIT_FAILURE, "Failed to chown mmap file %s: %d(%s)\n",
+                                       mc_ctx->file, ret, strerror(ret));
+            return ret;
+        }
     }
 
     ret = sss_br_lock_file(mc_ctx->fd, 0, 1, retries, t);
