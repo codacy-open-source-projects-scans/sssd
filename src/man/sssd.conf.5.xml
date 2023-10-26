@@ -70,8 +70,7 @@
         <para>
             The configuration file <filename>sssd.conf</filename> will
             include configuration snippets using the include directory
-            <filename>conf.d</filename>. This feature is available if
-            SSSD was compiled with libini version 1.3.0 or later.
+            <filename>conf.d</filename>.
         </para>
 
         <para>
@@ -221,15 +220,6 @@
                 like the identity domains.
                 <variablelist>
                     <title>Section parameters</title>
-                    <varlistentry>
-                        <term>config_file_version (integer)</term>
-                        <listitem>
-                            <para>
-                                Indicates what is the syntax of the config
-                                file. SSSD 0.6.0 and later use version 2.
-                            </para>
-                        </listitem>
-                    </varlistentry>
                     <varlistentry>
                         <term>services</term>
                         <listitem>
@@ -2938,7 +2928,14 @@ pam_gssapi_indicators_map = sudo:pkinit, sudo-i:pkinit
                     <listitem>
                         <para>
                             Determines if user credentials are also cached
-                            in the local LDB cache.
+                            in the local LDB cache. The cached credentials
+                            refer to passwords, which includes the first (long
+                            term) factor of two-factor authentication, not
+                            other authentication mechanisms. Passkey and
+                            Smartcard authentications are expected to work
+                            offline as long as a successful online
+                            authentication is recorded in the cache without
+                            additional configuration.
                         </para>
                         <para>
                             Take a note that while credentials are stored as
@@ -4013,6 +4010,14 @@ subdomain_inherit = ldap_purge_cache_timeout
                             <quote>enable:passkey, enable:smartcard</quote>
                         </para>
                         <para>
+                            Please note that if local Smartcard authentication
+                            is enabled and a Smartcard is present, Smartcard
+                            authentication will be preferred over the
+                            authentication methods supported by the backend.
+                            I.e. there will be a PIN prompt instead of e.g. a
+                            password prompt.
+                        </para>
+                        <para>
                             The following configuration example allows local users
                             to authenticate locally using any enabled method
                             (i.e. smartcard, passkey).
@@ -4136,7 +4141,9 @@ auto_private_groups = false
                         <para>
                             Default: not set by default, you have to take an
                             existing pam configuration or create a new one and
-                            add the service name here.
+                            add the service name here. As an alternative you
+                            can enable local authentication with the
+                            local_auth_policy option.
                         </para>
                     </listitem>
                 </varlistentry>
@@ -4561,7 +4568,6 @@ ldap_user_extra_attrs = phone:telephoneNumber
 [sssd]
 domains = LDAP
 services = nss, pam
-config_file_version = 2
 
 [nss]
 filter_groups = root

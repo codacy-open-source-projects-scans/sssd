@@ -1,5 +1,4 @@
 import subprocess
-import time
 
 import pytest
 
@@ -10,7 +9,8 @@ from sssd.testlib.common.utils import sssdTools
 @pytest.mark.admultiforest
 class TestADMultiForest(object):
 
-    def test_0001_multiforest(multihost, newhostname, adjoin):
+    @staticmethod
+    def test_0001_multiforest(self, multihost, newhostname, adjoin):
         """
         :title: IDM-SSSD-TC: ad_provider: admultiforest : Authentication against two forests
         :id: 900f2467-1aca-430c-bbaa-b22d30a829ad
@@ -115,3 +115,4 @@ class TestADMultiForest(object):
         assert getent_domain1_user2.returncode == 0, f"Could not find user2 {getent_domain1_user2}!"
         assert id_domain1_user1.returncode == 0, f"Could not find user1 {id_domain1_user1}!"
         assert id_domain1_user2.returncode == 0, f"Could not find user2 {id_domain1_user2}!"
+

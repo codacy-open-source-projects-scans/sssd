@@ -2528,7 +2528,6 @@ done:
     return ret;
 }
 
-#ifdef BUILD_FILES_PROVIDER
 static errno_t certmap_local_check(struct ldb_message *msg)
 {
     const char *rule_name;
@@ -2578,11 +2577,11 @@ static errno_t certmap_local_check(struct ldb_message *msg)
 
     return EOK;
 }
-#endif
 
 static errno_t confdb_get_all_certmaps(TALLOC_CTX *mem_ctx,
                                        struct confdb_ctx *cdb,
                                        struct sss_domain_info *dom,
+                                       bool certmaps_for_local_users,
                                        struct certmap_info ***_certmap_list)
 {
     TALLOC_CTX *tmp_ctx = NULL;
@@ -2628,8 +2627,7 @@ static errno_t confdb_get_all_certmaps(TALLOC_CTX *mem_ctx,
     }
 
     for (c = 0; c < res->count; c++) {
-#ifdef BUILD_FILES_PROVIDER
-        if (is_files_provider(dom)) {
+        if (certmaps_for_local_users) {
             ret = certmap_local_check(res->msgs[c]);
             if (ret != EOK) {
                 DEBUG(SSSDBG_CONF_SETTINGS,
@@ -2638,7 +2636,6 @@ static errno_t confdb_get_all_certmaps(TALLOC_CTX *mem_ctx,
                 continue;
             }
         }
-#endif
         ret = sysdb_ldb_msg_attr_to_certmap_info(certmap_list, res->msgs[c],
                                                  attrs, &certmap_list[c]);
         if (ret != EOK) {
@@ -2658,7 +2655,8 @@ done:
 }
 
 int confdb_certmap_to_sysdb(struct confdb_ctx *cdb,
-                            struct sss_domain_info *dom)
+                            struct sss_domain_info *dom,
+                            bool certmaps_for_local_users)
 {
     int ret;
     TALLOC_CTX *tmp_ctx;
@@ -2670,7 +2668,8 @@ int confdb_certmap_to_sysdb(struct confdb_ctx *cdb,
         return ENOMEM;
     }
 
-    ret = confdb_get_all_certmaps(tmp_ctx, cdb, dom, &certmap_list);
+    ret = confdb_get_all_certmaps(tmp_ctx, cdb, dom, certmaps_for_local_users,
+                                  &certmap_list);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE, "confdb_get_all_certmaps failed.\n");
         goto done;

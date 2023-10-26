@@ -79,9 +79,6 @@ def create_conf_fixture(request, contents):
 
 
 def create_sssd_kcm_fixture(sock_path, krb5_conf_path, request):
-    if subprocess.call(['sssd', "--genconf"]) != 0:
-        raise Exception("failed to regenerate confdb")
-
     resp_path = os.path.join(config.LIBEXEC_PATH, "sssd", "sssd_kcm")
     if not os.access(resp_path, os.X_OK):
         # It would be cleaner to use pytest.mark.skipif on the package level
@@ -117,8 +114,13 @@ def create_sssd_kcm_fixture(sock_path, krb5_conf_path, request):
         try:
             os.unlink(os.path.join(config.SECDB_PATH, "secrets.ldb"))
         except OSError as osex:
-            if osex.errno == 2:
-                pass
+            if osex.errno != 2:
+                raise osex
+        try:
+            os.unlink(abs_sock_path)
+        except OSError as osex:
+            if osex.errno != 2:
+                raise osex
 
     request.addfinalizer(kcm_teardown)
     return kcm_pid

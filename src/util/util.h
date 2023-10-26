@@ -96,6 +96,10 @@
         {"gid", 0, POPT_ARG_INT, &gid, 0, \
           _("The group ID to run the server as"), NULL},
 
+#define SSSD_CONFIG_OPTS(opt_config_file) \
+        {"config", 'c', POPT_ARG_STRING, &opt_config_file, 0, \
+         _("Specify a non-default config file"), NULL}, \
+
 extern int socket_activated;
 
 #ifdef HAVE_SYSTEMD
@@ -212,6 +216,7 @@ int pidfile(const char *file);
 int server_setup(const char *name, bool is_responder,
                  int flags,
                  uid_t uid, gid_t gid,
+                 const char *db_file,
                  const char *conf_entry,
                  struct main_context **main_ctx,
                  bool allow_sss_loop);

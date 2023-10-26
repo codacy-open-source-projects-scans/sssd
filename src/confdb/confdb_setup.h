@@ -22,8 +22,10 @@
 #ifndef CONFDB_SETUP_H_
 #define CONFDB_SETUP_H_
 
-#define CONFDB_VERSION "2"
-#define CONFDB_VERSION_INT 2
+#include <stdbool.h>
+#include <talloc.h>
+
+#include "util/util_errors.h"
 
 #define CONFDB_BASE_LDIF \
      "dn: @ATTRIBUTES\n" \
@@ -40,16 +42,14 @@
      "@LIST: server_sort\n" \
      "\n"
 
-#define CONFDB_INTERNAL_LDIF \
-     "dn: cn=config\n" \
-     "version: "CONFDB_VERSION"\n" \
-     "\n"
+struct confdb_ctx;
 
 errno_t confdb_setup(TALLOC_CTX *mem_ctx,
                      const char *cdb_file,
                      const char *config_file,
                      const char *config_dir,
                      const char *only_section,
+                     bool allow_missing_file,
                      struct confdb_ctx **_cdb);
 
 #endif /* CONFDB_SETUP_H_ */

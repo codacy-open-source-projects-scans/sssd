@@ -183,7 +183,7 @@ endif
 if BUILD_SAMBA
 sssdlibexec_PROGRAMS += gpo_child
 endif
-if BUILD_SEMANAGE
+if BUILD_SELINUX
 sssdlibexec_PROGRAMS += selinux_child
 endif
 sssdlibexec_PROGRAMS += p11_child
@@ -498,7 +498,6 @@ dist_noinst_DATA = \
     src/config/testconfigs/sssd-valid.conf \
     src/config/testconfigs/noparse.api.conf \
     src/config/testconfigs/sssd-noversion.conf \
-    src/config/testconfigs/sssd-badversion.conf \
     src/config/testconfigs/sssd-invalid.conf \
     src/config/testconfigs/sssd-invalid-badbool.conf \
     src/config/testconfigs/sssd-nonexisting-services-domains.conf \
@@ -1340,7 +1339,7 @@ libsss_semanage_la_LIBADD = \
     $(TALLOC_LIBS) \
     libsss_debug.la \
     $(NULL)
-if BUILD_SEMANAGE
+if BUILD_SELINUX
 libsss_semanage_la_LIBADD += $(SEMANAGE_LIBS)
 endif
 
@@ -1793,6 +1792,7 @@ sssd_kcm_SOURCES = \
     src/util/sss_sockets.c \
     src/util/sss_krb5.c \
     src/util/sss_iobuf.c \
+    src/confdb/confdb_setup.c \
     $(SSSD_RESPONDER_OBJ) \
     $(NULL)
 sssd_kcm_CFLAGS = \
@@ -2229,7 +2229,7 @@ FILES_TESTS_LIBS = \
 if BUILD_SELINUX
     FILES_TESTS_LIBS += $(SELINUX_LIBS)
 endif
-if BUILD_SEMANAGE
+if BUILD_SELINUX
     FILES_TESTS_LIBS += $(SEMANAGE_LIBS)
 endif
 
@@ -3860,6 +3860,7 @@ test_passkey_LDFLAGS = \
     -Wl,-wrap,fido_dev_open \
     -Wl,-wrap,fido_dev_has_uv \
     -Wl,-wrap,fido_dev_has_pin \
+    -Wl,-wrap,fido_dev_supports_uv \
     -Wl,-wrap,fido_dev_make_cred \
     -Wl,-wrap,fido_cred_x5c_ptr \
     -Wl,-wrap,fido_cred_verify \
@@ -4410,6 +4411,8 @@ libsss_proxy_la_SOURCES = \
     src/providers/proxy/proxy_hosts.c \
     src/providers/proxy/proxy_ipnetworks.c \
     src/providers/proxy/proxy_auth.c \
+    src/providers/proxy/proxy_certmap.c \
+    src/util/cert_derb64_to_ldap_filter.c \
     src//util/nss_dl_load.c \
     $(NULL)
 libsss_proxy_la_CFLAGS = \
@@ -4425,6 +4428,7 @@ libsss_proxy_la_LIBADD = \
     $(SSSD_INTERNAL_LTLIBS) \
     libsss_iface.la \
     libsss_sbus.la \
+    libsss_certmap.la \
     $(NULL)
 libsss_proxy_la_LDFLAGS = \
     -avoid-version \
@@ -4580,7 +4584,7 @@ libsss_ipa_la_SOURCES += \
     src/providers/ipa/ipa_sudo_async.c
 endif
 
-if BUILD_SEMANAGE
+if BUILD_SELINUX
 libsss_ipa_la_SOURCES += \
     src/providers/ipa/ipa_selinux.c \
     src/providers/ipa/ipa_selinux_maps.c
@@ -4723,7 +4727,7 @@ ldap_child_LDADD = \
     $(DHASH_LIBS) \
     $(KRB5_LIBS)
 
-if BUILD_SEMANAGE
+if BUILD_SELINUX
 selinux_child_SOURCES = \
     src/providers/ipa/selinux_child.c \
     src/util/sss_semanage.c \
@@ -5475,13 +5479,15 @@ install-exec-hook: installsssddirs
 if BUILD_PYTHON2_BINDINGS
 	if [ "$(DESTDIR)" = "" ]; then \
 		cd $(builddir)/src/config; \
-		$(PYTHON2) setup.py build --build-base $(abs_builddir)/src/config \
-			install $(DISTSETUPOPTS) --prefix=$(PYTHON2_PREFIX) \
+		$(MKDIR_P) "$(python2dir)"; \
+		PYTHONPATH="$(PYTHONPATH):$(python2dir)" $(PYTHON2) setup.py build \
+			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON2_PREFIX) \
 			--record=$(abs_builddir)/src/config/.files2; \
 	else \
 		cd $(builddir)/src/config; \
-		$(PYTHON2) setup.py build --build-base $(abs_builddir)/src/config \
-			install $(DISTSETUPOPTS) --prefix=$(PYTHON2_PREFIX) \
+		$(MKDIR_P) "$(python2dir)"; \
+		PYTHONPATH="$(PYTHONPATH):$(python2dir)" $(PYTHON2) setup.py build \
+			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON2_PREFIX) \
 			--record=$(abs_builddir)/src/config/.files2 --root=$(DESTDIR); \
 	fi
 	cd $(DESTDIR)$(py2execdir) && \
@@ -5493,13 +5499,15 @@ endif
 if BUILD_PYTHON3_BINDINGS
 	if [ "$(DESTDIR)" = "" ]; then \
 		cd $(builddir)/src/config; \
-		$(PYTHON3) setup.py build --build-base $(abs_builddir)/src/config \
-			install $(DISTSETUPOPTS) --prefix=$(PYTHON3_PREFIX) \
+		$(MKDIR_P) "$(python3dir)"; \
+		PYTHONPATH="$(PYTHONPATH):$(python3dir)" $(PYTHON3) setup.py build \
+			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON3_PREFIX) \
 			--record=$(abs_builddir)/src/config/.files3; \
 	else \
 		cd $(builddir)/src/config; \
-		$(PYTHON3) setup.py build --build-base $(abs_builddir)/src/config \
-			install $(DISTSETUPOPTS) --prefix=$(PYTHON3_PREFIX) \
+		$(MKDIR_P) "$(python3dir)"; \
+		PYTHONPATH="$(PYTHONPATH):$(python3dir)" $(PYTHON3) setup.py build \
+			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON3_PREFIX) \
 			--record=$(abs_builddir)/src/config/.files3 --root=$(DESTDIR); \
 	fi
 	cd $(DESTDIR)$(py3execdir) && \
@@ -5527,7 +5535,7 @@ if SSSD_USER
 	chmod 4750 $(DESTDIR)$(sssdlibexecdir)/krb5_child
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/proxy_child
 	chmod 4750 $(DESTDIR)$(sssdlibexecdir)/proxy_child
-if BUILD_SEMANAGE
+if BUILD_SELINUX
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/selinux_child
 	chmod 4750 $(DESTDIR)$(sssdlibexecdir)/selinux_child
 endif
@@ -5563,10 +5571,16 @@ uninstall-hook:
 if BUILD_PYTHON2_BINDINGS
 	cd $(DESTDIR)$(py2execdir) && \
 		rm -f pysss.so pyhbac.so pysss_murmur.so pysss_nss_idmap.so
+	rm -fr "$(DESTDIR)$(python2dir)/easy-install.pth"
+	rm -fr "$(DESTDIR)$(python2dir)/__pycache__"
+	rm -fr "$(DESTDIR)$(python2dir)/site.py"
 endif
 if BUILD_PYTHON3_BINDINGS
 	cd $(DESTDIR)$(py3execdir) && \
 		rm -f pysss.so pyhbac.so pysss_murmur.so pysss_nss_idmap.so
+	rm -fr "$(DESTDIR)$(python3dir)/easy-install.pth"
+	rm -fr "$(DESTDIR)$(python3dir)/__pycache__"
+	rm -fr "$(DESTDIR)$(python3dir)/site.py"
 endif
 if BUILD_SAMBA
 	rm $(DESTDIR)/$(winbindplugindir)/sss.so
@@ -5656,6 +5670,7 @@ RPMBUILD ?= $(PWD)/rpmbuild
 dist_noinst_DATA += \
     m4 \
     contrib/sssd.spec.in \
+    contrib/sssd.sysusers.in \
     BUILD.txt \
     COPYING \
     src/tests/multihost/README.md \
@@ -5695,6 +5710,7 @@ if GIT_CHECKOUT
 endif
 	cp $(builddir)/contrib/sssd.spec $(RPMBUILD)/SPECS
 	cp $(distdir).tar.gz $(RPMBUILD)/SOURCES
+	cp $(builddir)/contrib/sssd.sysusers $(RPMBUILD)/SOURCES
 
 rpms: rpmbrprep
 	cd $(RPMBUILD); \

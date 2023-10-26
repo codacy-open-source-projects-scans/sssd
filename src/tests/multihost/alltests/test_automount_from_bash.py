@@ -50,11 +50,12 @@ def common_sssd_setup(multihost):
 
 
 @pytest.fixture(scope='function')
-def ldap_autofs(multihost):
+def ldap_autofs(multihost, request):
     """
     This is common sssd setup used in this test suite.
     """
     tools = sssdTools(multihost.client[0])
+    multihost.client[0].run_command("mount")
     tools.sssd_conf("nss", {'filter_groups': 'root',
                             'filter_users': 'root',
                             'debug_level': '9'}, action='update')
@@ -71,6 +72,10 @@ def ldap_autofs(multihost):
                                         "ldap_autofs_entry_value": "nisMapEntry"}, action='update')
     tools.clear_sssd_cache()
 
+    def restore():
+        """Will restore client after test."""
+        multihost.client[0].run_command("systemctl restart autofs", raiseonerr=False)
+    request.addfinalizer(restore)
 
 @pytest.fixture(scope='class')
 def nfs_server_setup(multihost, request):
@@ -103,7 +108,7 @@ def create_users(multihost, request):
     client.run_command("authselect select sssd --force")
     client.run_command("cp -f /etc/nsswitch.conf /etc/nsswitch.conf.backup")
     client.run_command("cp -f /etc/sysconfig/autofs /etc/sysconfig/autofs_bkp")
-    client.run_command("sed -i 's/automount:  files/automount:  sss files/g' /etc/nsswitch.conf")
+    client.run_command("sed --follow-symlinks -i 's/automount:  files/automount:  sss files/g' /etc/nsswitch.conf")
     ldap_uri = f'ldap://{multihost.master[0].sys_hostname}'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
     ldap_inst.org_unit("mount", ds_suffix)

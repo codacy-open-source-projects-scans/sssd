@@ -412,9 +412,6 @@ AM_CONDITIONAL([BUILD_PYTHON_BINDINGS],
 
 AS_IF([test x$HAVE_SELINUX != x], [
     AM_CHECK_SELINUX
-])
-
-AS_IF([test x$HAVE_SEMANAGE != x -a x$HAVE_SELINUX != x], [
     AM_CHECK_SEMANAGE
 ])
 
@@ -545,7 +542,7 @@ AC_SUBST([abs_builddir], $abs_build_dir)
 my_srcdir=`readlink -f $srcdir`
 AC_DEFINE_UNQUOTED([ABS_SRC_DIR], ["$my_srcdir"], [Absolute path to the source directory])
 
-AC_CONFIG_FILES([Makefile contrib/sssd.spec src/examples/rwtab src/doxy.config
+AC_CONFIG_FILES([Makefile contrib/sssd.spec contrib/sssd.sysusers src/examples/rwtab src/doxy.config
                  contrib/sssd-pcsc.rules
                  src/sysv/sssd src/sysv/gentoo/sssd src/sysv/gentoo/sssd-kcm
                  po/Makefile.in src/man/Makefile src/tests/cwrap/Makefile

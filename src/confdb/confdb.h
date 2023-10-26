@@ -40,6 +40,7 @@
 
 #define CONFDB_DEFAULT_CFG_FILE_VER 2
 #define CONFDB_FILE "config.ldb"
+#define CONFDB_KCM_FILE "config_kcm.ldb"
 #define SSSD_CONFIG_FILE_NAME "sssd.conf"
 #define SSSD_CONFIG_FILE SSSD_CONF_DIR"/"SSSD_CONFIG_FILE_NAME
 #define CONFDB_DEFAULT_CONFIG_DIR_NAME "conf.d"
@@ -772,7 +773,8 @@ int confdb_get_sub_sections(TALLOC_CTX *mem_ctx,
  * @return EINVAL - Typically internal processing error
  */
 int confdb_certmap_to_sysdb(struct confdb_ctx *cdb,
-                            struct sss_domain_info *dom);
+                            struct sss_domain_info *dom,
+                            bool certmaps_for_local_users);
 
 /**
  * @}

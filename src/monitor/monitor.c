@@ -1502,7 +1502,7 @@ errno_t load_configuration(TALLOC_CTX *mem_ctx,
     }
 
     ret = confdb_setup(ctx, cdb_file, config_file, config_dir, only_section,
-                       &ctx->cdb);
+                       false, &ctx->cdb);
     if (ret != EOK) {
         DEBUG(SSSDBG_FATAL_FAILURE, "Unable to setup ConfDB [%d]: %s\n",
              ret, sss_strerror(ret));
@@ -2001,6 +2001,7 @@ int main(int argc, const char *argv[])
         POPT_AUTOHELP
         SSSD_MAIN_OPTS
         SSSD_LOGGER_OPTS
+        SSSD_CONFIG_OPTS(opt_config_file)
         {"daemon", 'D', POPT_ARG_NONE, &opt_daemon, 0, \
          _("Become a daemon (default)"), NULL }, \
         {"interactive", 'i', POPT_ARG_NONE, &opt_interactive, 0, \
@@ -2008,8 +2009,6 @@ int main(int argc, const char *argv[])
         {"disable-netlink", '\0', POPT_ARG_NONE | POPT_ARGFLAG_DOC_HIDDEN,
             &opt_netlinkoff, 0, \
          _("Disable netlink interface"), NULL}, \
-        {"config", 'c', POPT_ARG_STRING, &opt_config_file, 0, \
-         _("Specify a non-default config file"), NULL}, \
         {"genconf", 'g', POPT_ARG_NONE, &opt_genconf, 0, \
          _("Refresh the configuration database, then exit"), \
          NULL}, \
@@ -2227,7 +2226,7 @@ int main(int argc, const char *argv[])
     ret = close(STDIN_FILENO);
     if (ret != EOK) return 6;
 
-    ret = server_setup(SSSD_MONITOR_NAME, false, flags, 0, 0,
+    ret = server_setup(SSSD_MONITOR_NAME, false, flags, 0, 0, CONFDB_FILE,
                        monitor->conf_path, &main_ctx, false);
     if (ret != EOK) return 2;
 
