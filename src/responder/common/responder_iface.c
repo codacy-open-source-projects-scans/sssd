@@ -20,6 +20,7 @@
 #include "responder/common/negcache.h"
 #include "responder/common/responder.h"
 
+#ifdef BUILD_FILES_PROVIDER
 static void set_domain_state_by_name(struct resp_ctx *rctx,
                                      const char *domain_name,
                                      enum sss_domain_state state)
@@ -72,6 +73,7 @@ sss_resp_domain_inconsistent(TALLOC_CTX *mem_ctx,
 
     return EOK;
 }
+#endif /* BUILD_FILES_PROVIDER */
 
 static errno_t
 sss_resp_reset_ncache_users(TALLOC_CTX *mem_ctx,
@@ -99,35 +101,22 @@ sss_resp_register_sbus_iface(struct sbus_connection *conn,
 {
     errno_t ret;
 
-    SBUS_INTERFACE(iface_resp_domain,
-        sssd_Responder_Domain,
-        SBUS_METHODS(
-            SBUS_SYNC(METHOD, sssd_Responder_Domain, SetActive, sss_resp_domain_active, rctx),
-            SBUS_SYNC(METHOD, sssd_Responder_Domain, SetInconsistent, sss_resp_domain_inconsistent, rctx)
-        ),
-        SBUS_SIGNALS(SBUS_NO_SIGNALS),
-        SBUS_PROPERTIES(SBUS_NO_PROPERTIES)
+    struct sbus_listener listeners[] = SBUS_LISTENERS(
+#ifdef BUILD_FILES_PROVIDER
+        SBUS_LISTEN_SYNC(sssd_Responder_Domain, SetActive,
+                         SSS_BUS_PATH, sss_resp_domain_active, rctx),
+        SBUS_LISTEN_SYNC(sssd_Responder_Domain, SetInconsistent,
+                         SSS_BUS_PATH, sss_resp_domain_inconsistent, rctx),
+#endif /* BUILD_FILES_PROVIDER */
+        SBUS_LISTEN_SYNC(sssd_Responder_NegativeCache, ResetUsers,
+                         SSS_BUS_PATH, sss_resp_reset_ncache_users, rctx),
+        SBUS_LISTEN_SYNC(sssd_Responder_NegativeCache, ResetGroups,
+                         SSS_BUS_PATH, sss_resp_reset_ncache_groups, rctx)
     );
 
-    SBUS_INTERFACE(iface_resp_negcache,
-        sssd_Responder_NegativeCache,
-        SBUS_METHODS(
-            SBUS_SYNC(METHOD, sssd_Responder_NegativeCache, ResetUsers, sss_resp_reset_ncache_users, rctx),
-            SBUS_SYNC(METHOD, sssd_Responder_NegativeCache, ResetGroups, sss_resp_reset_ncache_groups, rctx)
-        ),
-        SBUS_SIGNALS(SBUS_NO_SIGNALS),
-        SBUS_PROPERTIES(SBUS_NO_PROPERTIES)
-    );
-
-    struct sbus_path paths[] = {
-        {SSS_BUS_PATH, &iface_resp_domain},
-        {SSS_BUS_PATH, &iface_resp_negcache},
-        {NULL, NULL}
-    };
-
-    ret = sbus_connection_add_path_map(conn, paths);
+    ret = sbus_router_listen_map(conn, listeners);
     if (ret != EOK) {
-        DEBUG(SSSDBG_FATAL_FAILURE, "Unable to add paths [%d]: %s\n",
+        DEBUG(SSSDBG_FATAL_FAILURE, "Unable to add listeners [%d]: %s\n",
               ret, sss_strerror(ret));
     }
 
@@ -151,7 +140,7 @@ sss_resp_register_service_iface(struct resp_ctx *rctx)
         )
     );
 
-    ret = sbus_connection_add_path(rctx->mon_conn, SSS_BUS_PATH, &iface_svc);
+    ret = sbus_connection_add_path(rctx->sbus_conn, SSS_BUS_PATH, &iface_svc);
     if (ret != EOK) {
         DEBUG(SSSDBG_FATAL_FAILURE, "Unable to register service interface"
               "[%d]: %s\n", ret, sss_strerror(ret));

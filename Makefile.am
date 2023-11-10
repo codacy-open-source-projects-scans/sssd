@@ -1233,6 +1233,7 @@ libsss_iface_sync_la_LDFLAGS = \
 
 pkglib_LTLIBRARIES += libsss_util.la
 libsss_util_la_SOURCES = \
+    src/sbus/sbus_opath.c \
     src/confdb/confdb.c \
     src/db/sysdb.c \
     src/db/sysdb_ops.c \
@@ -1839,7 +1840,6 @@ sssd_be_SOURCES = \
     src/providers/data_provider/dp_builtin.c \
     src/providers/data_provider/dp_iface_backend.c \
     src/providers/data_provider/dp_iface_failover.c \
-    src/providers/data_provider/dp_client.c \
     src/providers/data_provider/dp_resp_client.c \
     src/providers/data_provider/dp_request.c \
     src/providers/data_provider/dp_reply_std.c \

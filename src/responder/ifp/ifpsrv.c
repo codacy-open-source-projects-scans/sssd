@@ -148,7 +148,7 @@ ifp_register_service_iface(struct ifp_ctx *ifp_ctx,
         )
     );
 
-    ret = sbus_connection_add_path(rctx->mon_conn, SSS_BUS_PATH, &iface_svc);
+    ret = sbus_connection_add_path(rctx->sbus_conn, SSS_BUS_PATH, &iface_svc);
     if (ret != EOK) {
         DEBUG(SSSDBG_FATAL_FAILURE, "Unable to register service interface"
               "[%d]: %s\n", ret, sss_strerror(ret));
@@ -277,13 +277,13 @@ int ifp_process_init(TALLOC_CTX *mem_ctx,
     }
 
     /* The responder is initialized. Now tell it to the monitor. */
-    ret = sss_monitor_service_init(rctx, rctx->ev, SSS_BUS_IFP,
-                                   SSS_IFP_SBUS_SERVICE_NAME,
-                                   SSS_IFP_SBUS_SERVICE_VERSION,
-                                   MT_SVC_SERVICE,
-                                   &rctx->last_request_time, &rctx->mon_conn);
+    ret = sss_monitor_register_service(rctx, rctx->sbus_conn,
+                                       SSS_IFP_SBUS_SERVICE_NAME,
+                                       SSS_IFP_SBUS_SERVICE_VERSION,
+                                       MT_SVC_SERVICE);
     if (ret != EOK) {
-        DEBUG(SSSDBG_FATAL_FAILURE, "fatal error setting up message bus\n");
+        DEBUG(SSSDBG_FATAL_FAILURE, "Unable to register to the monitor "
+              "[%d]: %s\n", ret, sss_strerror(ret));
         goto fail;
     }
 

@@ -432,7 +432,7 @@ sss_nss_register_service_iface(struct sss_nss_ctx *nss_ctx,
         )
     );
 
-    ret = sbus_connection_add_path(rctx->mon_conn, SSS_BUS_PATH, &iface_svc);
+    ret = sbus_connection_add_path(rctx->sbus_conn, SSS_BUS_PATH, &iface_svc);
     if (ret != EOK) {
         DEBUG(SSSDBG_FATAL_FAILURE, "Unable to register service interface"
               "[%d]: %s\n", ret, sss_strerror(ret));
@@ -520,7 +520,6 @@ int sss_nss_process_init(TALLOC_CTX *mem_ctx,
 {
     struct resp_ctx *rctx;
     struct sss_cmd_table *nss_cmds;
-    struct be_conn *iter;
     struct sss_nss_ctx *nctx;
     int ret;
     enum idmap_error_code err;
@@ -554,13 +553,6 @@ int sss_nss_process_init(TALLOC_CTX *mem_ctx,
     if (ret != EOK) {
         DEBUG(SSSDBG_FATAL_FAILURE, "fatal error getting nss config\n");
         goto fail;
-    }
-
-    for (iter = nctx->rctx->be_conns; iter; iter = iter->next) {
-        ret = sss_nss_register_backend_iface(iter->conn, nctx);
-        if (ret != EOK) {
-            goto fail;
-        }
     }
 
     err = sss_idmap_init(sss_idmap_talloc, nctx, sss_idmap_talloc_free,
@@ -652,12 +644,18 @@ int sss_nss_process_init(TALLOC_CTX *mem_ctx,
     }
 
     /* The responder is initialized. Now tell it to the monitor. */
-    ret = sss_monitor_service_init(rctx, rctx->ev, SSS_BUS_NSS,
-                                   NSS_SBUS_SERVICE_NAME,
-                                   NSS_SBUS_SERVICE_VERSION, MT_SVC_SERVICE,
-                                   &rctx->last_request_time, &rctx->mon_conn);
+    ret = sss_monitor_register_service(rctx, rctx->sbus_conn,
+                                       NSS_SBUS_SERVICE_NAME,
+                                       NSS_SBUS_SERVICE_VERSION,
+                                       MT_SVC_SERVICE);
     if (ret != EOK) {
-        DEBUG(SSSDBG_FATAL_FAILURE, "fatal error setting up message bus\n");
+        DEBUG(SSSDBG_FATAL_FAILURE, "Unable to register to the monitor "
+              "[%d]: %s\n", ret, sss_strerror(ret));
+        goto fail;
+    }
+
+    ret = sss_nss_register_backend_iface(nctx->rctx->sbus_conn, nctx);
+    if (ret != EOK) {
         goto fail;
     }
 
