@@ -103,7 +103,6 @@ static errno_t get_client_cred(struct cli_ctx *cctx)
     cctx->creds = talloc_zero(cctx, struct cli_creds);
     if (!cctx->creds) return ENOMEM;
 
-#ifdef HAVE_UCRED
     socklen_t client_cred_len = sizeof(struct ucred);
     char proc_path[32];
     char cmd_line[255] = { 0 };
@@ -128,19 +127,25 @@ static errno_t get_client_cred(struct cli_ctx *cctx)
     }
 
     if (cctx->creds->ucred.pid > -1) {
-        snprintf(proc_path, sizeof(proc_path), "/proc/%d/cmdline",
-                 (int)cctx->creds->ucred.pid);
-        proc_fd = open(proc_path, O_RDONLY);
-        if (proc_fd != -1) {
-            if (sss_fd_nonblocking(proc_fd) == EOK) {
-                ret = read(proc_fd, cmd_line, sizeof(cmd_line)-1);
-                if (ret > 0) {
-                    cmd_line[ret] = 0;
-                    cctx->cmd_line = talloc_strdup(cctx, cmd_line);
+        ret = snprintf(proc_path, sizeof(proc_path), "/proc/%d/cmdline",
+                       (int)cctx->creds->ucred.pid);
+        if ((ret > 0) && (ret < sizeof(proc_path))) {
+            proc_fd = open(proc_path, O_RDONLY);
+            if (proc_fd != -1) {
+                if (sss_fd_nonblocking(proc_fd) == EOK) {
+                    ret = read(proc_fd, cmd_line, sizeof(cmd_line)-1);
+                    if (ret > 0) {
+                        cmd_line[ret] = 0;
+                        cctx->cmd_line = talloc_strdup(cctx, cmd_line);
+                    }
                 }
+                close(proc_fd);
             }
-            close(proc_fd);
         }
+    }
+
+    if (cctx->cmd_line == NULL) {
+        cctx->cmd_line = "-unknown-";
     }
 
     DEBUG(SSSDBG_TRACE_ALL,
@@ -148,7 +153,6 @@ static errno_t get_client_cred(struct cli_ctx *cctx)
           cctx, cctx->cfd,
           cctx->creds->ucred.uid, cctx->creds->ucred.gid,
           cctx->creds->ucred.pid, cmd_line);
-#endif
 
     ret = SELINUX_getpeercon(cctx->cfd, &secctx);
     if (ret != 0) {
@@ -491,7 +495,6 @@ static int cli_ctx_destructor(struct cli_ctx *cctx)
 
 struct accept_fd_ctx {
     struct resp_ctx *rctx;
-    bool is_private;
     connection_setup_t connection_setup;
 };
 
@@ -526,36 +529,15 @@ static void accept_fd_handler(struct tevent_context *ev,
     struct resp_ctx *rctx = accept_ctx->rctx;
     struct cli_ctx *cctx;
     socklen_t len;
-    struct stat stat_buf;
     int ret;
-    int fd = accept_ctx->is_private ? rctx->priv_lfd : rctx->lfd;
 
     rctx->client_id_num++;
-    if (accept_ctx->is_private) {
-        ret = stat(rctx->priv_sock_name, &stat_buf);
-        if (ret == -1) {
-            DEBUG(SSSDBG_CRIT_FAILURE,
-                  "stat on privileged pipe failed: [%d][%s].\n",
-                  errno, strerror(errno));
-            accept_and_terminate_cli(fd);
-            return;
-        }
-
-        if ( ! (stat_buf.st_uid == 0 && stat_buf.st_gid == 0 &&
-               (stat_buf.st_mode&(S_IFSOCK|S_IRUSR|S_IWUSR)) == stat_buf.st_mode)) {
-            DEBUG(SSSDBG_CRIT_FAILURE,
-                  "privileged pipe has an illegal status.\n");
-            accept_and_terminate_cli(fd);
-            return;
-        }
-    }
 
     cctx = talloc_zero(rctx, struct cli_ctx);
     if (!cctx) {
         DEBUG(SSSDBG_FATAL_FAILURE,
-              "Out of memory trying to setup client context%s!\n",
-              accept_ctx->is_private ? " on privileged pipe": "");
-        accept_and_terminate_cli(fd);
+              "Out of memory trying to setup client context!\n");
+        accept_and_terminate_cli(rctx->lfd);
         return;
     }
 
@@ -564,20 +546,22 @@ static void accept_fd_handler(struct tevent_context *ev,
     cctx->client_id_num = rctx->client_id_num;
 
     len = sizeof(cctx->addr);
-    cctx->cfd = accept(fd, (struct sockaddr *)&cctx->addr, &len);
+    cctx->cfd = accept(rctx->lfd, (struct sockaddr *)&cctx->addr, &len);
     if (cctx->cfd == -1) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Accept failed [%s]\n", strerror(errno));
         talloc_free(cctx);
         return;
     }
 
-    cctx->priv = accept_ctx->is_private;
-
     ret = get_client_cred(cctx);
     if (ret != EOK) {
-        DEBUG(SSSDBG_OP_FAILURE, "get_client_cred failed, "
-                  "client cred may not be available.\n");
+        DEBUG(SSSDBG_CRIT_FAILURE, "get_client_cred() failed\n");
+        close(cctx->cfd);
+        talloc_free(cctx);
+        return;
     }
+
+    cctx->priv = (client_euid(cctx->creds) == 0);
 
     if (rctx->allowed_uids_count != 0) {
         if (client_euid(cctx->creds) == -1) {
@@ -613,9 +597,7 @@ static void accept_fd_handler(struct tevent_context *ev,
     if (ret != EOK) {
         close(cctx->cfd);
         talloc_free(cctx);
-        DEBUG(SSSDBG_OP_FAILURE,
-              "Failed to setup client handler%s\n",
-               accept_ctx->is_private ? " on privileged pipe" : "");
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to setup client handler\n");
         return;
     }
 
@@ -625,9 +607,7 @@ static void accept_fd_handler(struct tevent_context *ev,
     if (!cctx->cfde) {
         close(cctx->cfd);
         talloc_free(cctx);
-        DEBUG(SSSDBG_OP_FAILURE,
-              "Failed to queue client handler%s\n",
-               accept_ctx->is_private ? " on privileged pipe" : "");
+        DEBUG(SSSDBG_OP_FAILURE, "Failed to queue client handler\n");
         return;
     }
     tevent_fd_set_close_fn(cctx->cfde, client_close_fn);
@@ -653,9 +633,9 @@ static void accept_fd_handler(struct tevent_context *ev,
     }
 
     DEBUG(SSSDBG_TRACE_FUNC,
-          "[CID#%u] Client [cmd %s][uid %u][%p][%d] connected%s!\n",
+          "[CID#%u] Client [cmd %s][uid %u][%p][%d] connected!\n",
           cctx->client_id_num, cctx->cmd_line, client_euid(cctx->creds),
-          cctx, cctx->cfd, accept_ctx->is_private ? " to privileged pipe" : "");
+          cctx, cctx->cfd);
 
     return;
 }
@@ -788,42 +768,6 @@ static int set_unix_socket(struct resp_ctx *rctx,
     errno_t ret;
     struct accept_fd_ctx *accept_ctx = NULL;
 
-/* for future use */
-#if 0
-    char *default_pipe;
-    int ret;
-
-    default_pipe = talloc_asprintf(rctx, "%s/%s", PIPE_PATH,
-                                   rctx->sss_pipe_name);
-    if (!default_pipe) {
-        return ENOMEM;
-    }
-
-    ret = confdb_get_string(rctx->cdb, rctx,
-                            rctx->confdb_socket_path, "unixSocket",
-                            default_pipe, &rctx->sock_name);
-    if (ret != EOK) {
-        talloc_free(default_pipe);
-        return ret;
-    }
-    talloc_free(default_pipe);
-
-    default_pipe = talloc_asprintf(rctx, "%s/private/%s", PIPE_PATH,
-                                   rctx->sss_pipe_name);
-    if (!default_pipe) {
-        return ENOMEM;
-    }
-
-    ret = confdb_get_string(rctx->cdb, rctx,
-                            rctx->confdb_socket_path, "privUnixSocket",
-                            default_pipe, &rctx->priv_sock_name);
-    if (ret != EOK) {
-        talloc_free(default_pipe);
-        return ret;
-    }
-    talloc_free(default_pipe);
-#endif
-
     if (rctx->sock_name != NULL ) {
         /* Set the umask so that permissions are set right on the socket.
          * It must be readable and writable by anybody on the system. */
@@ -837,7 +781,6 @@ static int set_unix_socket(struct resp_ctx *rctx,
         accept_ctx = talloc_zero(rctx, struct accept_fd_ctx);
         if(!accept_ctx) goto failed;
         accept_ctx->rctx = rctx;
-        accept_ctx->is_private = false;
         accept_ctx->connection_setup = conn_setup;
 
         rctx->lfde = tevent_add_fd(rctx->ev, rctx, rctx->lfd,
@@ -849,37 +792,10 @@ static int set_unix_socket(struct resp_ctx *rctx,
         }
     }
 
-    if (rctx->priv_sock_name != NULL ) {
-        /* create privileged pipe */
-        if (rctx->priv_lfd == -1) {
-            ret = create_pipe_fd(rctx->priv_sock_name, &rctx->priv_lfd,
-                                 DFL_RSP_UMASK);
-            if (ret != EOK) {
-                goto failed;
-            }
-        }
-
-        accept_ctx = talloc_zero(rctx, struct accept_fd_ctx);
-        if(!accept_ctx) goto failed;
-        accept_ctx->rctx = rctx;
-        accept_ctx->is_private = true;
-        accept_ctx->connection_setup = conn_setup;
-
-        rctx->priv_lfde = tevent_add_fd(rctx->ev, rctx, rctx->priv_lfd,
-                                   TEVENT_FD_READ, accept_fd_handler,
-                                   accept_ctx);
-        if (!rctx->priv_lfde) {
-            DEBUG(SSSDBG_FATAL_FAILURE,
-                  "Failed to queue handler on privileged pipe\n");
-            goto failed;
-        }
-    }
-
     return EOK;
 
 failed:
     if (rctx->lfd >= 0) close(rctx->lfd);
-    if (rctx->priv_lfd >= 0) close(rctx->priv_lfd);
     return EIO;
 }
 
@@ -892,10 +808,8 @@ int activate_unix_sockets(struct resp_ctx *rctx,
     struct sockaddr_un sockaddr;
     socklen_t sockaddr_len = sizeof(sockaddr);
 
-    if (rctx->lfd == -1 && rctx->priv_lfd == -1) {
-        int numfds = (rctx->sock_name ? 1 : 0)
-                     + (rctx->priv_sock_name ? 1 : 0);
-        /* but if systemd support is available, check if the sockets
+    if ((rctx->lfd == -1) && (rctx->sock_name != NULL)) {
+        /* if systemd support is available, check if the sockets
          * have been opened for us, via socket activation */
         ret = sd_listen_fds(1);
         if (ret < 0) {
@@ -903,15 +817,14 @@ int activate_unix_sockets(struct resp_ctx *rctx,
                   "Unexpected error probing for active sockets. "
                   "Will proceed with no sockets. [Error %d (%s)]\n",
                   -ret, sss_strerror(-ret));
-        } else if (ret > numfds) {
+        } else if (ret > 1) {
             DEBUG(SSSDBG_FATAL_FAILURE,
-                  "Too many activated sockets have been found, "
-                  "expected %d, found %d\n", numfds, ret);
+                  "More than one activated sockets have been found\n");
             ret = E2BIG;
             goto done;
         }
 
-        if (ret == numfds) {
+        if (ret == 1) {
             rctx->lfd = SD_LISTEN_FDS_START;
             ret = sd_is_socket_unix(rctx->lfd, SOCK_STREAM, 1, NULL, 0);
             if (ret < 0) {
@@ -925,7 +838,7 @@ int activate_unix_sockets(struct resp_ctx *rctx,
             if (ret == EOK) {
                 if (rctx->sock_name &&
                     memcmp(rctx->sock_name, sockaddr.sun_path, strlen(rctx->sock_name)) != 0) {
-                    DEBUG(SSSDBG_CONF_SETTINGS,
+                    DEBUG(SSSDBG_IMPORTANT_INFO,
                           "Warning: socket path defined in systemd unit (%s) and sssd.conf (%s) don't match\n",
                           sockaddr.sun_path, rctx->sock_name);
                 }
@@ -933,19 +846,6 @@ int activate_unix_sockets(struct resp_ctx *rctx,
 
             ret = sss_fd_nonblocking(rctx->lfd);
             if (ret != EOK) goto done;
-            if (numfds == 2) {
-                rctx->priv_lfd = SD_LISTEN_FDS_START + 1;
-                ret = sd_is_socket_unix(rctx->priv_lfd, SOCK_STREAM, 1, NULL, 0);
-                if (ret < 0) {
-                    DEBUG(SSSDBG_CRIT_FAILURE,
-                          "Activated priv socket is not a UNIX listening socket\n");
-                    ret = EIO;
-                    goto done;
-                }
-
-                ret = sss_fd_nonblocking(rctx->priv_lfd);
-                if (ret != EOK) goto done;
-            }
         }
     }
 #endif
@@ -1155,8 +1055,6 @@ int sss_process_init(TALLOC_CTX *mem_ctx,
                      struct sss_cmd_table sss_cmds[],
                      const char *sss_pipe_name,
                      int pipe_fd,
-                     const char *sss_priv_pipe_name,
-                     int priv_pipe_fd,
                      const char *confdb_service_path,
                      const char *conn_name,
                      const char *svc_name,
@@ -1177,9 +1075,7 @@ int sss_process_init(TALLOC_CTX *mem_ctx,
     rctx->cdb = cdb;
     rctx->sss_cmds = sss_cmds;
     rctx->sock_name = sss_pipe_name;
-    rctx->priv_sock_name = sss_priv_pipe_name;
     rctx->lfd = pipe_fd;
-    rctx->priv_lfd = priv_pipe_fd;
     rctx->confdb_service_path = confdb_service_path;
     rctx->shutting_down = false;
     rctx->socket_activated = is_socket_activated();
