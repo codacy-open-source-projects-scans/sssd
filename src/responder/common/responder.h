@@ -74,6 +74,7 @@ struct resp_ctx {
     struct tevent_context *ev;
     struct tevent_fd *lfde;
     int lfd;
+    mode_t lfd_umask;
     struct confdb_ctx *cdb;
     const char *sock_name;
 
@@ -174,7 +175,7 @@ int sss_process_init(TALLOC_CTX *mem_ctx,
                      struct confdb_ctx *cdb,
                      struct sss_cmd_table sss_cmds[],
                      const char *sss_pipe_name,
-                     int pipe_fd,
+                     mode_t pipe_umask,
                      const char *confdb_service_path,
                      const char *conn_name,
                      const char *svc_name,
