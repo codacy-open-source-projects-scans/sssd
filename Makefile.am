@@ -812,7 +812,6 @@ dist_noinst_HEADERS = \
     src/db/sysdb_subid.h \
     src/db/sysdb_domain_resolution_order.h \
     src/db/sysdb_passkey_user_verification.h \
-    src/db/sysdb_computer.h \
     src/db/sysdb_iphosts.h \
     src/db/sysdb_ipnetworks.h \
     src/confdb/confdb.h \
@@ -1252,7 +1251,6 @@ libsss_util_la_SOURCES = \
     src/db/sysdb_iphosts.c \
     src/db/sysdb_ipnetworks.c \
     src/util/sss_pam_data.c \
-    src/db/sysdb_computer.c \
     src/db/sysdb_subid.c \
     src/util/util.c \
     src/util/util_ext.c \
@@ -2356,7 +2354,10 @@ ipa_ldap_opt_tests_LDADD = \
     $(LDB_LIBS) \
     $(SSSD_INTERNAL_LTLIBS) \
     $(OPENLDAP_LIBS) \
-    libsss_test_common.la
+    libsss_test_common.la \
+    libsss_ldap_common.la \
+    libdlopen_test_providers.la \
+    $(NULL)
 
 ad_ldap_opt_tests_SOURCES = \
     src/providers/ldap/ldap_opts.c \
@@ -2918,6 +2919,8 @@ nestedgroups_tests_LDADD = \
     $(SSSD_INTERNAL_LTLIBS) \
     libsss_idmap.la \
     libsss_test_common.la \
+    libsss_ldap_common.la \
+    libdlopen_test_providers.la \
     $(NULL)
 if BUILD_SYSTEMTAP
 nestedgroups_tests_LDADD += stap_generated_probes.lo
@@ -3164,6 +3167,8 @@ sdap_tests_LDADD = \
     $(SSSD_INTERNAL_LTLIBS) \
     $(OPENLDAP_LIBS) \
     libsss_test_common.la \
+    libsss_ldap_common.la \
+    libdlopen_test_providers.la \
     $(NULL)
 
 if BUILD_IFP
@@ -3726,6 +3731,7 @@ test_iobuf_CFLAGS = \
 test_iobuf_LDADD = \
     $(CMOCKA_LIBS) \
     $(SSSD_LIBS) \
+    $(SSSD_INTERNAL_LTLIBS) \
     $(NULL)
 
 test_confdb_SOURCES = \
