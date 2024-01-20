@@ -103,6 +103,8 @@ condconfigexists = ConditionPathExists=\|/etc/sssd/sssd.conf\nConditionDirectory
 # originally then it's addition to CapabilityBoundingSet doesn't matter.
 if SSSD_NON_ROOT_USER
 additional_caps = CAP_DAC_OVERRIDE
+nss_service_user_group = User=$(SSSD_USER)\nGroup=$(SSSD_USER)
+nss_socket_user_group = SocketUser=$(SSSD_USER)\nSocketGroup=$(SSSD_USER)
 endif
 else
 ifp_dbus_exec_comment = \# "sss_signal" is used to force SSSD monitor to trigger "sssd_ifp" reconnection to dbus
@@ -5268,7 +5270,9 @@ edit_cmd = $(SED) \
         -e 's|@prefix[@]|$(prefix)|g' \
         -e 's|@SSSD_USER[@]|$(SSSD_USER)|g' \
         -e 's|@condconfigexists[@]|$(condconfigexists)|g' \
-        -e 's|@additional_caps[@]|$(additional_caps)|g'
+        -e 's|@additional_caps[@]|$(additional_caps)|g' \
+        -e 's|@nss_service_user_group[@]|$(nss_service_user_group)|g' \
+        -e 's|@nss_socket_user_group[@]|$(nss_socket_user_group)|g'
 
 replace_script = \
     @rm -f $@ $@.tmp; \
@@ -5641,6 +5645,7 @@ endif
 	rm -f $(builddir)/src/sysv/systemd/sssd-kcm.socket
 	rm -f $(builddir)/src/sysv/systemd/sssd-kcm.service
 	rm -f $(builddir)/src/tools/wrappers/sss_debuglevel
+	rm -Rf $(builddir)/contrib
 
 CLEANFILES += *.X */*.X */*/*.X
 
@@ -5669,6 +5674,7 @@ dist_noinst_DATA += \
     m4 \
     contrib/sssd.spec.in \
     contrib/sssd.sysusers \
+    contrib/90-sssd-token-access.rules \
     BUILD.txt \
     COPYING \
     src/tests/multihost/README.md \
