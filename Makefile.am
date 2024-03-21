@@ -90,27 +90,34 @@ sssdkcmdatadir = $(datadir)/sssd-kcm
 deskprofilepath = $(sss_statedir)/deskprofile
 
 if HAVE_SYSTEMD_UNIT
+
 ifp_dbus_exec_comment = \# If system is configured to use systemd ifp service ("SystemdService=") then "Exec=" and "User=" options are not used
 ifp_dbus_exec_cmd = $(sssdlibexecdir)/sssd_ifp --socket-activated
 ifp_systemdservice = SystemdService=sssd-ifp.service
 # SSSD requires a configuration file (either /etc/sssd/sssd.conf,
 # or some snippet under /etc/sssd/sssd.conf.d/) to be present.
 condconfigexists = ConditionPathExists=\|/etc/sssd/sssd.conf\nConditionDirectoryNotEmpty=\|/etc/sssd/conf.d/
-# If sssd is configured with --with-sssd-user=<user> where <user>!='root'
-# but is actually run under the root we need CAP_DAC_OVERRIDE to access
-# files owned by <user>:<user>
-# If sssd is really run under non-root account that doesn't have this cap
-# originally then it's addition to CapabilityBoundingSet doesn't matter.
+
 if SSSD_NON_ROOT_USER
-additional_caps = CAP_DAC_OVERRIDE
+# If non-root service user is supported, monitor might need SET-ID to switch user (deprecated 'sssd.conf::user' option)
+# but this is non default configuration, so 'AmbientCapabilities=' are commented out.
+# Bounding set needs to list capabilities required by ldap/krb5/selinux_childs, otherwise they can't gain it.
+capabilities = CapabilityBoundingSet= CAP_CHOWN CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID\n\# Uncomment if support of deprecated "sssd.conf::user" option is required:\n\#AmbientCapabilities= CAP_SETGID CAP_SETUID
 nss_service_user_group = User=$(SSSD_USER)\nGroup=$(SSSD_USER)
 nss_socket_user_group = SocketUser=$(SSSD_USER)\nSocketGroup=$(SSSD_USER)
-endif
+supplementary_groups = \# If service configured to be run under "root", uncomment "SupplementaryGroups"\n\#SupplementaryGroups=$(SSSD_USER)
+else
+# If non-root service user isn't supported, monitor/sssd_be/responders don't need any effective capabilities
+# but bounding set needs to list capabilities required by ldap/krb5/selinux_childs, otherwise they can't gain it.
+capabilities = CapabilityBoundingSet= CAP_CHOWN CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+supplementary_groups = \# Note: SSSD package was built without support of running as non-privileged user
+endif # SSSD_NON_ROOT_USER
+
 else
 ifp_dbus_exec_comment = \# "sss_signal" is used to force SSSD monitor to trigger "sssd_ifp" reconnection to dbus
 ifp_dbus_exec_cmd = $(sssdlibexecdir)/sss_signal
 ifp_systemdservice =
-endif
+endif # HAVE_SYSTEMD_UNIT
 
 secdbpath = @secdbpath@
 
@@ -1287,6 +1294,7 @@ libsss_util_la_SOURCES = \
     src/util/well_known_sids.c \
     src/util/string_utils.c \
     src/util/become_user.c \
+    src/util/capabilities.c \
     src/util/util_watchdog.c \
     src/util/sss_ptr_hash.c \
     src/util/files.c \
@@ -1303,6 +1311,7 @@ libsss_util_la_CFLAGS = \
 libsss_util_la_LIBADD = \
     $(LIBADD_TIMER) \
     $(SSSD_LIBS) \
+    $(CAP_LIBS) \
     $(SYSTEMD_LOGIN_LIBS) \
     $(UNICODE_LIBS) \
     $(PCRE_LIBS) \
@@ -1512,6 +1521,7 @@ endif
 ####################
 sssd_SOURCES = \
     src/monitor/monitor.c \
+    src/monitor/monitor_bootstrap.c \
     src/monitor/monitor_netlink.c \
     src/confdb/confdb_setup.c \
     src/util/nscd.c \
@@ -1627,12 +1637,15 @@ if BUILD_SSH
 sssd_ssh_SOURCES = \
     src/responder/ssh/sshsrv.c \
     src/responder/ssh/ssh_cmd.c \
-    src/responder/ssh/ssh_known_hosts.c \
     src/responder/ssh/ssh_protocol.c \
     src/responder/ssh/ssh_reply.c \
     src/responder/ssh/ssh_cert_to_ssh_key.c \
     $(SSSD_RESPONDER_OBJ) \
     $(NULL)
+if BUILD_SSH_KNOWN_HOSTS_PROXY
+sssd_ssh_SOURCES += \
+    src/responder/ssh/ssh_known_hosts.c
+endif
 sssd_ssh_LDADD = \
     $(LIBADD_DL) \
     $(SSSD_LIBS) \
@@ -2691,11 +2704,14 @@ ssh_srv_tests_SOURCES = \
     $(TEST_MOCK_RESP_OBJ) \
     src/tests/cmocka/test_ssh_srv.c \
     src/responder/ssh/ssh_cmd.c \
-    src/responder/ssh/ssh_known_hosts.c \
     src/responder/ssh/ssh_protocol.c \
     src/responder/ssh/ssh_reply.c \
     src/responder/ssh/ssh_cert_to_ssh_key.c \
     $(NULL)
+if BUILD_SSH_KNOWN_HOSTS_PROXY
+ssh_srv_tests_SOURCES += \
+    src/responder/ssh/ssh_known_hosts.c
+endif
 ssh_srv_tests_CFLAGS = \
     -U SSSD_LIBEXEC_PATH -DSSSD_LIBEXEC_PATH=\"$(abs_builddir)\" \
     -I$(abs_builddir)/src \
@@ -4075,6 +4091,7 @@ intgcheck-prepare:
 	$(abs_top_srcdir)/configure \
 	    --prefix="$$prefix" \
 	    --with-ldb-lib-dir="$$prefix"/lib/ldb \
+	    --with-pid-path="$$prefix"/run/sssd \
 	    --enable-intgcheck-reqs \
 	    --without-semanage \
 	    --with-files-provider \
@@ -4695,6 +4712,7 @@ krb5_child_SOURCES = \
     src/util/authtok.c \
     src/util/authtok-utils.c \
     src/util/util.c \
+    src/util/capabilities.c \
     src/util/util_ext.c \
     src/util/signal.c \
     src/util/sss_chain_id.c \
@@ -4723,6 +4741,7 @@ krb5_child_LDADD = \
     $(CLIENT_LIBS) \
     $(SYSTEMD_LOGIN_LIBS) \
     $(JANSSON_LIBS) \
+    $(CAP_LIBS) \
     $(NULL)
 
 ldap_child_SOURCES = \
@@ -4736,6 +4755,7 @@ ldap_child_SOURCES = \
     src/util/authtok-utils.c \
     src/util/util.c \
     src/util/util_ext.c \
+    src/util/capabilities.c \
     src/util/signal.c \
     src/util/become_user.c \
     src/util/util_errors.c \
@@ -4748,6 +4768,7 @@ ldap_child_LDADD = \
     libsss_debug.la \
     $(TALLOC_LIBS) \
     $(POPT_LIBS) \
+    $(CAP_LIBS) \
     $(DHASH_LIBS) \
     $(KRB5_LIBS)
 
@@ -5280,16 +5301,16 @@ edit_cmd = $(SED) \
         -e 's|@environment_file[@]|$(environment_file)|g' \
         -e 's|@localstatedir[@]|$(localstatedir)|g' \
         -e 's|@runstatedir[@]|$(runstatedir)|g' \
-        -e 's|@pidpath[@]|$(pidpath)|g' \
         -e 's|@logpath[@]|$(logpath)|g' \
         -e 's|@libexecdir[@]|$(libexecdir)|g' \
         -e 's|@pipepath[@]|$(pipepath)|g' \
         -e 's|@prefix[@]|$(prefix)|g' \
         -e 's|@SSSD_USER[@]|$(SSSD_USER)|g' \
         -e 's|@condconfigexists[@]|$(condconfigexists)|g' \
-        -e 's|@additional_caps[@]|$(additional_caps)|g' \
+        -e 's|@capabilities[@]|$(capabilities)|g' \
         -e 's|@nss_service_user_group[@]|$(nss_service_user_group)|g' \
-        -e 's|@nss_socket_user_group[@]|$(nss_socket_user_group)|g'
+        -e 's|@nss_socket_user_group[@]|$(nss_socket_user_group)|g' \
+        -e 's|@supplementary_groups[@]|$(supplementary_groups)|g'
 
 replace_script = \
     @rm -f $@ $@.tmp; \
@@ -5696,7 +5717,6 @@ dist_noinst_DATA += \
     src/tests/multihost/conftest.py \
     src/tests/multihost/basic/mhc.yaml \
     src/tests/multihost/basic/test_basic.py \
-    src/tests/multihost/basic/test_config.py \
     src/tests/multihost/basic/test_files.py \
     src/tests/multihost/basic/test_ifp.py \
     src/tests/multihost/basic/test_kcm.py \

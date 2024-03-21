@@ -33,6 +33,7 @@
 #include <netinet/in.h>
 #include <limits.h>
 #include <sys/un.h>
+#include <sys/capability.h>
 
 #include <talloc.h>
 #include <tevent.h>
@@ -109,7 +110,7 @@ extern int socket_activated;
 #define FLAGS_DAEMON 0x0001
 #define FLAGS_INTERACTIVE 0x0002
 #define FLAGS_PID_FILE 0x0004
-#define FLAGS_GEN_CONF 0x0008
+/* 0x0008 was used by FLAGS_GEN_CONF that was removed; can be reused */
 #define FLAGS_NO_WATCHDOG 0x0010
 
 enum sssd_exit_status {
@@ -389,8 +390,6 @@ const char * const * get_known_services(void);
 
 errno_t sss_user_by_name_or_uid(const char *input, uid_t *_uid, gid_t *_gid);
 void sss_sssd_user_uid_and_gid(uid_t *_uid, gid_t *_gid);
-void sss_set_sssd_user_eid(void);
-void sss_restore_sssd_user_eid(void);
 
 int split_on_separator(TALLOC_CTX *mem_ctx, const char *str,
                        const char sep, bool trim, bool skip_empty,
@@ -752,6 +751,9 @@ errno_t switch_creds(TALLOC_CTX *mem_ctx,
                      int num_gids, gid_t *gids,
                      struct sss_creds **saved_creds);
 errno_t restore_creds(struct sss_creds *saved_creds);
+errno_t sss_log_caps_to_str(bool only_non_zero, char **_str);
+errno_t sss_drop_cap(cap_value_t cap);
+void sss_drop_all_caps(void);
 
 /* from sss_semanage.c */
 /* Please note that libsemange relies on files and directories created with

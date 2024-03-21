@@ -35,12 +35,12 @@ AC_DEFUN([WITH_PLUGIN_PATH],
 AC_DEFUN([WITH_PID_PATH],
   [ AC_ARG_WITH([pid-path],
                 [AC_HELP_STRING([--with-pid-path=PATH],
-                                [Where to store pid files for the SSSD [/var/run]]
+                                [Where to store pid files for the SSSD [/run/sssd/]]
                                )
                 ]
                )
-    config_pidpath="\"VARDIR\"/run"
-    pidpath="${localstatedir}/run"
+    config_pidpath="/run/sssd"
+    pidpath="/run/sssd"
     if test x"$with_pid_path" != x; then
         config_pidpath=$with_pid_path
         pidpath=$with_pid_path
@@ -705,6 +705,22 @@ AC_DEFUN([WITH_SSH],
         AC_DEFINE(BUILD_SSH, 1, [whether to build with SSH support])
     fi
     AM_CONDITIONAL([BUILD_SSH], [test x"$with_ssh" = xyes])
+  ])
+
+AC_DEFUN([WITH_SSH_KNOWN_HOSTS_PROXY],
+  [ AC_ARG_WITH([ssh-known-hosts-proxy],
+                [AC_HELP_STRING([--with-ssh-known-hosts-proxy],
+                                [Whether to build the sss_ssh_knownhostsproxy tool [no]]
+                               )
+                ],
+                [with_ssh_know_hosts_proxy=$withval],
+                with_ssh_know_hosts_proxy=no
+               )
+
+    if test x"$with_ssh" = xyes -a x"$with_ssh_know_hosts_proxy" = xyes; then
+        AC_DEFINE(BUILD_SSH_KNOWN_HOSTS_PROXY, 1, [whether to build the sss_ssh_knownhostsproxy tool])
+    fi
+    AM_CONDITIONAL([BUILD_SSH_KNOWN_HOSTS_PROXY], [test x"$with_ssh" = xyes -a x"$with_ssh_know_hosts_proxy" = xyes])
   ])
 
 AC_DEFUN([WITH_IFP],

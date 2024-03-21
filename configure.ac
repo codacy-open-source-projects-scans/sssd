@@ -186,6 +186,7 @@ WITH_SUBID
 WITH_SUBID_LIB_PATH
 WITH_PASSKEY
 WITH_SSH
+WITH_SSH_KNOWN_HOSTS_PROXY
 WITH_IFP
 WITH_LIBSIFP
 WITH_SYSLOG
@@ -511,6 +512,13 @@ AS_IF([test x$have_check = x], [
     AC_MSG_WARN([Without the 'CHECK' libraries, you will be unable to run all tests in the 'make check' suite])
 ], [
     AC_CHECK_HEADERS([check.h],,AC_MSG_ERROR([Could not find CHECK headers]))
+])
+
+PKG_CHECK_MODULES([CAP], [libcap], [have_libcap=1], [have_libcap=])
+AS_IF([test x$have_libcap = x], [
+    AC_MSG_ERROR([libcap is missing])
+], [
+    AC_CHECK_HEADERS([sys/capability.h],,AC_MSG_ERROR([Could not find sys/capability.h headers]))
 ])
 
 AC_PATH_PROG([DOXYGEN], [doxygen], [false])
