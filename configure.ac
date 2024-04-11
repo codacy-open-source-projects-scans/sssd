@@ -223,7 +223,6 @@ m4_include([src/external/nsupdate.m4])
 m4_include([src/external/libkeyutils.m4])
 m4_include([src/external/libkrad.m4])
 m4_include([src/external/libnl.m4])
-m4_include([src/external/systemd.m4])
 m4_include([src/external/pac_responder.m4])
 m4_include([src/external/cifsidmap.m4])
 m4_include([src/external/signal.m4])
@@ -280,9 +279,13 @@ AS_IF([test x$HAVE_NSCD], [
 
 WITH_INITSCRIPT
 AS_IF([test x$initscript = xsystemd], [
+    m4_include([src/external/systemd.m4])
     WITH_SYSTEMD_UNIT_DIR
     WITH_SYSTEMD_CONF_DIR
 ], [
+    AS_IF([test x$syslog = xjournald], [
+        AC_MSG_ERROR(['--with-syslog=journald' requires '--with-initscript=systemd'])
+    ])
     CHECK_SERVICE_EXECUTABLE
 ])
 
