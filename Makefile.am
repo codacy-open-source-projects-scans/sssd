@@ -26,6 +26,7 @@ SUBDIRS += . src/tests/cwrap src/tests/intg src/tests/test_CA \
 # Some old versions of automake don't define builddir
 builddir ?= .
 
+SETCAP = @SETCAP@
 DOXYGEN = @DOXYGEN@
 
 DISTSETUPOPTS =
@@ -5420,6 +5421,7 @@ src/tools/wrappers/sss_debuglevel: src/tools/wrappers/sss_debuglevel.in Makefile
 	$(replace_script)
 
 SSSD_USER_DIRS = \
+    $(DESTDIR)$(sss_statedir) \
     $(DESTDIR)$(dbpath) \
     $(DESTDIR)$(keytabdir) \
     $(DESTDIR)$(mcpath) \
@@ -5433,6 +5435,7 @@ SSSD_USER_DIRS = \
     $(DESTDIR)$(sssddefaultconfdir) \
     $(DESTDIR)$(logpath) \
     $(DESTDIR)$(deskprofilepath) \
+    $(DESTDIR)$(runstatedir)/sssd \
     $(NULL)
 
 installsssddirs::
@@ -5460,14 +5463,18 @@ if SSSD_USER
 	-chown $(SSSD_USER):$(SSSD_USER) $(SSSD_USER_DIRS)
 	-chown $(SSSD_USER) $(DESTDIR)$(pipepath)/private
 endif
-	$(INSTALL) -d -m 0700 $(DESTDIR)$(dbpath) $(DESTDIR)$(logpath) \
-	    $(DESTDIR)$(keytabdir) \
+	$(INSTALL) -d -m 0770 $(DESTDIR)$(dbpath) $(DESTDIR)$(logpath) \
+	    $(DESTDIR)$(keytabdir) $(DESTDIR)$(gpocachepath) \
 	    $(NULL)
-	$(INSTALL) -d -m 0750 $(DESTDIR)$(pipepath)/private
-	$(INSTALL) -d -m 0755 $(DESTDIR)$(mcpath) $(DESTDIR)$(pipepath) \
+	$(INSTALL) -d -m 0770 $(DESTDIR)$(pipepath)/private
+	$(INSTALL) -d -m 0771 $(DESTDIR)$(deskprofilepath)
+	$(INSTALL) -d -m 0775 $(DESTDIR)$(sss_statedir) \
+            $(DESTDIR)$(mcpath) $(DESTDIR)$(pipepath) \
             $(DESTDIR)$(pubconfpath) \
-            $(DESTDIR)$(pubconfpath)/krb5.include.d $(DESTDIR)$(gpocachepath)
-	$(INSTALL) -d -m 0711 $(DESTDIR)$(sssdconfdir) \
+            $(DESTDIR)$(pubconfpath)/krb5.include.d \
+            $(DESTDIR)$(runstatedir)/sssd \
+	    $(NULL)
+	$(INSTALL) -d -m 0750 $(DESTDIR)$(sssdconfdir) \
                           $(DESTDIR)$(sssdconfdir)/conf.d \
                           $(DESTDIR)$(sssdconfdir)/pki
 
@@ -5566,16 +5573,21 @@ else
 	$(MKDIR_P) $(DESTDIR)$(initdir)
 endif
 
+CHILD_CAPABILITIES="cap_chown,cap_dac_override,cap_setuid,cap_setgid=ep"
 if SSSD_USER
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/ldap_child
-	chmod 4750 $(DESTDIR)$(sssdlibexecdir)/ldap_child
+	chmod 750 $(DESTDIR)$(sssdlibexecdir)/ldap_child
+	-$(SETCAP) $(CHILD_CAPABILITIES) $(DESTDIR)$(sssdlibexecdir)/ldap_child
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/krb5_child
-	chmod 4750 $(DESTDIR)$(sssdlibexecdir)/krb5_child
+	chmod 750 $(DESTDIR)$(sssdlibexecdir)/krb5_child
+	-$(SETCAP) $(CHILD_CAPABILITIES) $(DESTDIR)$(sssdlibexecdir)/krb5_child
 if BUILD_SELINUX
 	-chgrp $(SSSD_USER) $(DESTDIR)$(sssdlibexecdir)/selinux_child
-	chmod 4750 $(DESTDIR)$(sssdlibexecdir)/selinux_child
+	chmod 750 $(DESTDIR)$(sssdlibexecdir)/selinux_child
+	-$(SETCAP) $(CHILD_CAPABILITIES) $(DESTDIR)$(sssdlibexecdir)/selinux_child
 endif
 endif
+
 
 install-data-hook:
 	rm $(DESTDIR)/$(nsslibdir)/libnss_sss.so.2 \
@@ -5590,6 +5602,7 @@ endif
 if BUILD_KCM
 	$(MKDIR_P) $(DESTDIR)/$(sssdkcmdatadir)
 	$(MKDIR_P) $(DESTDIR)$(secdbpath)
+	$(INSTALL) -d -m 0700 $(DESTDIR)$(secdbpath)
 endif
 
 uninstall-hook:
@@ -5708,18 +5721,10 @@ dist_noinst_DATA += \
     contrib/sssd.spec.in \
     contrib/sssd.sysusers \
     contrib/90-sssd-token-access.rules \
+    contrib/sssd-tmpfiles.conf \
     BUILD.txt \
     COPYING \
-    src/tests/multihost/README.md \
-    src/tests/multihost/conftest.py \
-    src/tests/multihost/basic/mhc.yaml \
-    src/tests/multihost/basic/test_basic.py \
-    src/tests/multihost/basic/test_files.py \
-    src/tests/multihost/basic/test_ifp.py \
-    src/tests/multihost/basic/test_kcm.py \
-    src/tests/multihost/basic/test_sssctl_config_check.py \
-    src/tests/multihost/basic/test_sudo.py \
-    src/tests/multihost/basic/utils_config.py \
+    src/tests/ \
     $(NULL)
 
 rpmroot:
