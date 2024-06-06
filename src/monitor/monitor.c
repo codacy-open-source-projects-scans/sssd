@@ -153,6 +153,8 @@ static int mark_service_as_started(struct mt_svc *svc);
 
 static int monitor_cleanup(void);
 
+static void monitor_quit(struct mt_ctx *mt_ctx, int ret);
+
 static int add_svc_conn_spy(struct mt_svc *svc);
 
 static int service_not_found(const char *svc_name,
@@ -505,7 +507,6 @@ static void services_startup_timeout(struct tevent_context *ev,
                                      struct timeval t, void *ptr)
 {
     struct mt_ctx *ctx = talloc_get_type(ptr, struct mt_ctx);
-    int i;
 
     if (ctx->services == NULL) {
         return;
@@ -514,17 +515,13 @@ static void services_startup_timeout(struct tevent_context *ev,
     DEBUG(SSSDBG_TRACE_FUNC, "Handling timeout\n");
 
     if (!ctx->services_started) {
-
-        DEBUG(SSSDBG_CRIT_FAILURE, "Providers did not start in time, "
-                  "forcing services startup!\n");
-
-        ctx->services_started = true;
-
-        DEBUG(SSSDBG_CONF_SETTINGS, "Now starting services!\n");
-        /* then start all services */
-        for (i = 0; ctx->services[i]; i++) {
-            add_new_service(ctx, ctx->services[i], 0);
-        }
+        /* This code is more a sanity guard: if any of providers
+         * didn't start to this moment (MONITOR_MAX_SVC_RESTARTS),
+         * `monitor_restart_service()` should already have process
+         * terminated anyway.
+         */
+        DEBUG(SSSDBG_CRIT_FAILURE, "Providers did not start in time!\n");
+        monitor_quit(ctx, 1);
     }
 }
 
@@ -533,8 +530,10 @@ static int add_services_startup_timeout(struct mt_ctx *ctx)
     struct tevent_timer *to;
     struct timeval tv;
 
-    /* 5 seconds should be plenty */
-    tv = tevent_timeval_current_ofs(5, 0);
+    /* 7 seconds should be enough to accommodate for
+     * MONITOR_MAX_SVC_RESTARTS & MONITOR_MAX_RESTART_DELAY
+     */
+    tv = tevent_timeval_current_ofs(7, 0);
     to = tevent_add_timer(ctx->ev, ctx, tv, services_startup_timeout, ctx);
     if (!to) {
         DEBUG(SSSDBG_FATAL_FAILURE,"Out of memory?!\n");
