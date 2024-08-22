@@ -51,9 +51,8 @@ def test_sudo__user_allowed(client: Client, provider: GenericProvider, sssd_serv
     provider.user("user-2").add()
     provider.sudorule("test").add(user=u, host="ALL", command="/bin/ls")
 
-    client.sssd.set_service_user(sssd_service_user)
     client.sssd.common.sudo()
-    client.sssd.start()
+    client.sssd.start(service_user=sssd_service_user)
 
     assert client.auth.sudo.list("user-1", "Secret123", expected=["(root) /bin/ls"]), "Sudo list failed!"
     assert client.auth.sudo.run("user-1", "Secret123", command="/bin/ls /root"), "Sudo command failed!"
@@ -190,10 +189,9 @@ def test_sudo__rules_refresh(client: Client, provider: GenericProvider, sssd_ser
     u = provider.user("user-1").add()
     r = provider.sudorule("test").add(user=u, host="ALL", command="/bin/ls")
 
-    client.sssd.set_service_user(sssd_service_user)
     client.sssd.common.sudo()
     client.sssd.domain["entry_cache_sudo_timeout"] = "2"
-    client.sssd.start()
+    client.sssd.start(service_user=sssd_service_user)
 
     assert client.auth.sudo.list("user-1", "Secret123", expected=["(root) /bin/ls"]), "Sudo list failed!"
     r.modify(command="/bin/less")
@@ -385,6 +383,11 @@ def test_sudo__sudonotbefore_shorttime(client: Client, provider: LDAP):
     ), "Sudo list failed!"
 
 
+# This test is testing randomized values, therefore it is possible that
+# the same refresh interval is generated multiple times (i.e. full refresh
+# is always 4 seconds) and therefore the test fails. However, we want to check
+# that random values are assigned so we must repeat the test in this case.
+@pytest.mark.flaky(max_runs=5)
 @pytest.mark.importance("low")
 @pytest.mark.slow(seconds=15)
 @pytest.mark.ticket(bz=1925514, gh=5609)
@@ -410,12 +413,18 @@ def test_sudo__refresh_random_offset(client: Client):
         ldap_sudo_smart_refresh_interval="1",
         ldap_sudo_random_offset="5",
     )
+
+    # Start SSSD and wait for few sudo updates to occur
     client.sssd.start()
     time.sleep(15)
+
+    # Stop SSSD to ensure that all logs are written
+    client.sssd.stop()
+
     log = client.fs.read(client.sssd.logs.domain())
     smart = set()
     full = set()
-    for m in re.findall(r"Task \[SUDO (Smart|Full).*\]: scheduling task (\d+) seconds", log):
+    for m in re.findall(r"Task \[SUDO (Smart|Full) Refresh\]: scheduling task (\d+) seconds", log):
         match m[0]:
             case "Smart":
                 smart.add(m[1])
@@ -529,12 +538,11 @@ def test_sudo__local_users_negative_cache(client: Client, provider: LDAP, sssd_s
     client.local.user("user-1").add()
     client.fs.write("/etc/sudoers.d/test", "user-1 ALL=(ALL) NOPASSWD:ALL")
 
-    client.sssd.set_service_user(sssd_service_user)
     client.sssd.common.sudo()
     client.sssd.nss.update(
         entry_negative_timeout="0",  # disable standard negative cache to make sure we hit the local user case
     )
-    client.sssd.start()
+    client.sssd.start(service_user=sssd_service_user)
 
     # Now there should be no query
     with client.ssh("user-1", "Secret123") as ssh:

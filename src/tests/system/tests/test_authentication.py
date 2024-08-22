@@ -39,8 +39,7 @@ def test_authentication__with_default_settings(
     """
     provider.user("user1").add(password="Secret123")
 
-    client.sssd.set_service_user(sssd_service_user)
-    client.sssd.start()
+    client.sssd.start(service_user=sssd_service_user)
 
     assert client.auth.parametrize(method).password("user1", "Secret123"), "User failed login!"
     assert not client.auth.parametrize(method).password(
@@ -68,14 +67,12 @@ def test_authentication__default_settings_when_the_provider_is_offline(
         3 Start SSSD
     :steps:
         1. Authenticate user with correct password
-        2. Block outbound traffic to the provider and force SSSD offline
-        3. Authenticate user with correct password
-        4. Authenticate user with incorrect password
+        2. Offline user authentication with correct password
+        3. Offline user authentication with incorrect password
     :expectedresults:
         1. User authentication is successful
-        2. No traffic is getting to the provider
-        3. User authentication is successful
-        4. User authentication is unsuccessful
+        2. User authentication is successful
+        3. User authentication is unsuccessful
     :customerscenario: False
     """
     user = "user1"
@@ -83,11 +80,10 @@ def test_authentication__default_settings_when_the_provider_is_offline(
     wrong = "Wrong123"
     provider.user(user).add(password=correct)
 
-    client.sssd.set_service_user(sssd_service_user)
     client.sssd.domain["cache_credentials"] = "True"
     client.sssd.domain["krb5_store_password_if_offline"] = "True"
     client.sssd.pam["offline_credentials_expiration"] = "0"
-    client.sssd.start()
+    client.sssd.start(service_user=sssd_service_user)
 
     assert client.auth.parametrize(method).password(user, correct), "User failed login!"
 
@@ -130,8 +126,7 @@ def test_authentication__using_the_users_email_address(client: Client, ad: AD, m
     ad.user("user-2").add(password="Secret123", email="user-2@alias-domain.com")
     ad.user("user_3").add(password="Secret123", email="user_3@alias-domain.com")
 
-    client.sssd.set_service_user(sssd_service_user)
-    client.sssd.start()
+    client.sssd.start(service_user=sssd_service_user)
 
     assert client.auth.parametrize(method).password(
         f"user-1@{ad.host.domain}", "Secret123"
