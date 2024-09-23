@@ -30,7 +30,6 @@
 
 #define CACHE_SYSDB_FILE "cache_%s.ldb"
 #define CACHE_TIMESTAMPS_FILE "timestamps_%s.ldb"
-#define LOCAL_SYSDB_FILE "sssd.ldb"
 
 #define SYSDB_INDEXES "@INDEXLIST"
 #define SYSDB_IDXATTR "@IDXATTR"
@@ -804,6 +803,7 @@ struct sysdb_upgrade_ctx {
 
 int sysdb_init_ext(TALLOC_CTX *mem_ctx,
                    struct sss_domain_info *domains,
+                   bool create_missing_cache,
                    struct sysdb_upgrade_ctx *upgrade_ctx);
 
 /* used to initialize only one domain database.

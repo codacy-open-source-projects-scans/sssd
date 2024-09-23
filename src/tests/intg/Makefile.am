@@ -23,7 +23,6 @@ dist_noinst_DATA = \
     test_netgroup.py \
     test_sssctl.py \
     files_ops.py \
-    test_files_ops.py \
     test_files_provider.py \
     kdc.py \
     krb5utils.py \
@@ -43,7 +42,6 @@ dist_noinst_DATA = \
     conftest.py \
     sssd_hosts.py \
     sssd_nets.py \
-    test_confdb.py \
     test_sss_cache.py \
     $(NULL)
 
