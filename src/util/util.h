@@ -219,6 +219,9 @@ int server_setup(const char *name, bool is_responder,
 void server_loop(struct main_context *main_ctx);
 void orderly_shutdown(int status);
 
+#define SSSSIG_RESET_WATCHDOG         SIGRTMIN
+#define SSSSIG_TIME_SHIFT_DETECTED    SIGRTMIN+1
+
 /* from signal.c */
 void BlockSignals(bool block, int signum);
 void (*CatchSignal(int signum,void (*handler)(int )))(int);
@@ -559,9 +562,6 @@ bool is_valid_domain_name(const char *domain);
  * use sss_crypto.h:sss_generate_csprng_buffer() instead!
  */
 int sss_rand(void);
-
-/* from nscd.c */
-errno_t sss_nscd_parse_conf(const char *conf_path);
 
 /* from sss_tc_utf8.c */
 char *
