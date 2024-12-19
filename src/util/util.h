@@ -736,31 +736,12 @@ char **concatenate_string_array(TALLOC_CTX *mem_ctx,
 errno_t mod_defaults_list(TALLOC_CTX *mem_ctx, const char **defaults_list,
                           char **mod_list, char ***_list);
 
-/* from become_user.c */
-errno_t become_user(uid_t uid, gid_t gid, bool keep_set_uid);
-struct sss_creds;
-errno_t switch_creds(TALLOC_CTX *mem_ctx,
-                     uid_t uid, gid_t gid,
-                     int num_gids, gid_t *gids,
-                     struct sss_creds **saved_creds);
-errno_t restore_creds(struct sss_creds *saved_creds);
+/* from capabilities.c */
 errno_t sss_log_caps_to_str(bool only_non_zero, char **_str);
 errno_t sss_set_cap_effective(cap_value_t cap, bool effective);
 errno_t sss_drop_cap(cap_value_t cap);
 void sss_drop_all_caps(void);
-
-/* from sss_semanage.c */
-/* Please note that libsemange relies on files and directories created with
- * certain permissions. Therefore the caller should make sure the umask is
- * not too restricted (especially when called from the daemon code).
- */
-int sss_set_seuser(const char *login_name, const char *seuser_name,
-                   const char *mlsrange);
-int sss_del_seuser(const char *login_name);
-int sss_get_seuser(const char *linuxuser,
-                   char **selinuxuser,
-                   char **level);
-int sss_seuser_exists(const char *linuxuser);
+void sss_log_process_caps(const char *stage);
 
 /* convert time from generalized form to unix time */
 errno_t sss_utc_to_time_t(const char *str, const char *format, time_t *unix_time);
@@ -878,4 +859,20 @@ static inline struct timeval sss_tevent_timeval_current_ofs_time_t(time_t secs)
     uint32_t secs32 = (secs > UINT_MAX ? UINT_MAX : secs);
     return tevent_timeval_current_ofs(secs32, 0);
 }
+
+/* parsed uri */
+struct sss_parsed_dns_uri {
+    const char *scheme;
+    const char *address;
+    const char *port;
+    const char *host;
+    const char *path;
+
+    char *data;
+};
+
+errno_t sss_parse_dns_uri(TALLOC_CTX *ctx,
+                          const char *uri,
+                          struct sss_parsed_dns_uri **_parsed_uri);
+
 #endif /* __SSSD_UTIL_H__ */

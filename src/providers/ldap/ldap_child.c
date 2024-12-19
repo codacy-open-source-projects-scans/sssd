@@ -891,8 +891,10 @@ static krb5_error_code privileged_krb5_setup(struct input_buffer *ibuf)
     }
     DEBUG(SSSDBG_TRACE_INTERNAL, "Kerberos context initialized\n");
 
+    sss_set_cap_effective(CAP_DAC_READ_SEARCH, true);
     kerr = copy_keytab_into_memory(ibuf, ibuf->context, ibuf->keytab_name,
                                    &keytab_name, NULL);
+    sss_drop_all_caps();
     if (kerr != 0) {
         DEBUG(SSSDBG_OP_FAILURE, "copy_keytab_into_memory failed.\n");
         return kerr;
@@ -911,10 +913,12 @@ static errno_t handle_select_principal(TALLOC_CTX *mem_ctx,
     char *sasl_primary = NULL;
     char *sasl_realm = NULL;
 
+    sss_set_cap_effective(CAP_DAC_READ_SEARCH, true);
     ret = select_principal_from_keytab(mem_ctx,
                                        ibuf->princ_str, ibuf->realm_str,
                                        ibuf->keytab_name,
                                        NULL, &sasl_primary, &sasl_realm);
+    sss_drop_all_caps();
     if (ret != 0) {
         DEBUG(SSSDBG_CRIT_FAILURE, "select_principal_from_keytab() failed\n");
         return ret;
@@ -946,10 +950,7 @@ static errno_t handle_get_tgt(TALLOC_CTX *mem_ctx,
 
     DEBUG(SSSDBG_TRACE_INTERNAL, "Kerberos context initialized\n");
 
-    sss_drop_all_caps();
-
-    DEBUG(SSSDBG_TRACE_INTERNAL,
-          "Running as [%"SPRIuid"][%"SPRIgid"].\n", geteuid(), getegid());
+    sss_log_process_caps("Running");
 
     DEBUG(SSSDBG_TRACE_INTERNAL, "getting TGT sync\n");
     kerr = ldap_child_get_tgt_sync(mem_ctx, ibuf->context,
@@ -975,7 +976,7 @@ int main(int argc, const char *argv[])
 {
     int ret;
     int opt;
-    int dumpable = 1;
+    int dummy = 1;
     int backtrace = 1;
     int debug_fd = -1;
     const char *opt_logger = NULL;
@@ -986,13 +987,12 @@ int main(int argc, const char *argv[])
     struct input_buffer *ibuf = NULL;
     struct response *resp = NULL;
     ssize_t written;
-    char *caps = NULL;
 
     struct poptOption long_options[] = {
         POPT_AUTOHELP
         SSSD_DEBUG_OPTS
-        {"dumpable", 0, POPT_ARG_INT, &dumpable, 0,
-         _("Allow core dumps"), NULL },
+        {"dumpable", 0, POPT_ARG_INT, &dummy, 0,
+         _("Ignored, /proc/sys/fs/suid_dumpable setting is in force"), NULL },
         {"backtrace", 0, POPT_ARG_INT, &backtrace, 0,
          _("Enable debug backtrace"), NULL },
         {"debug-fd", 0, POPT_ARG_INT, &debug_fd, 0,
@@ -1017,7 +1017,11 @@ int main(int argc, const char *argv[])
 
     poptFreeContext(pc);
 
-    prctl(PR_SET_DUMPABLE, (dumpable == 0) ? 0 : 1);
+    /* Don't touch PR_SET_DUMPABLE as 'ldap_child' handles host keytab.
+     * Rely on system settings instead: this flag "is reset to the
+     * current value contained in the file /proc/sys/fs/suid_dumpable"
+     * when "the process executes a program that has file capabilities".
+     */
 
     debug_prg_name = talloc_asprintf(NULL, "ldap_child[%d]", getpid());
     if (!debug_prg_name) {
@@ -1041,19 +1045,7 @@ int main(int argc, const char *argv[])
     BlockSignals(false, SIGTERM);
     CatchSignal(SIGTERM, sig_term_handler);
 
-    DEBUG(SSSDBG_CONF_SETTINGS,
-         "Starting under uid=%"SPRIuid" (euid=%"SPRIuid") : "
-         "gid=%"SPRIgid" (egid=%"SPRIgid")\n",
-         getuid(), geteuid(), getgid(), getegid());
-
-    ret = sss_log_caps_to_str(true, &caps);
-    if (ret == 0) {
-        DEBUG(SSSDBG_CONF_SETTINGS, "With following capabilities:\n%s",
-              caps ? caps : "   (nothing)\n");
-        talloc_free(caps);
-    } else {
-        DEBUG(SSSDBG_MINOR_FAILURE, "Failed to get current capabilities\n");
-    }
+    sss_log_process_caps("Starting");
 
     main_ctx = talloc_new(NULL);
     if (main_ctx == NULL) {
