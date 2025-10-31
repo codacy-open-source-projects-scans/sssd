@@ -1,0 +1,34 @@
+[Unit]
+Description=System Security Services Daemon
+# SSSD must be running before we permit user sessions
+Before=systemd-user-sessions.service nss-user-lookup.target
+Wants=nss-user-lookup.target
+StartLimitIntervalSec=50s
+StartLimitBurst=5
+@condconfigexists@
+
+[Service]
+Environment=DEBUG_LOGGER=--logger=files
+EnvironmentFile=-@environment_file@
+# '-H' is used with @sssdconfdir@ to support use case where /etc/sssd is a symlink.
+# '-H' only allows following a command line argument itself, everything else encountered due to '-R' isn't followed.
+ExecStartPre=+-/bin/chown -f -R -H root:@SSSD_USER@ @sssdconfdir@
+ExecStartPre=+-/bin/chmod -f -R g+r @sssdconfdir@
+ExecStartPre=+-/bin/chmod -f g+x @sssdconfdir@
+ExecStartPre=+-/bin/chmod -f g+x @sssdconfdir@/conf.d
+ExecStartPre=+-/bin/chmod -f g+x @sssdconfdir@/pki
+ExecStartPre=+-/bin/sh -c "/bin/chown -f -h @SSSD_USER@:@SSSD_USER@ @dbpath@/*.ldb"
+ExecStartPre=+-/bin/chown -f -R -h @SSSD_USER@:@SSSD_USER@ @gpocachepath@
+ExecStartPre=+-/bin/sh -c "/bin/chown -f -h @SSSD_USER@:@SSSD_USER@ @logpath@/*.log*"
+ExecStart=@sbindir@/sssd -i ${DEBUG_LOGGER}
+Type=notify
+NotifyAccess=main
+Restart=on-abnormal
+@capabilities@
+SecureBits=noroot noroot-locked
+User=@SSSD_USER@
+Group=@SSSD_USER@
+@supplementary_groups@
+
+[Install]
+WantedBy=multi-user.target

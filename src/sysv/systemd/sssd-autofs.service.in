@@ -1,0 +1,20 @@
+[Unit]
+Description=SSSD AutoFS Service responder
+Documentation=man:sssd.conf(5)
+After=sssd.service
+BindsTo=sssd.service
+RefuseManualStart=true
+
+[Install]
+Also=sssd-autofs.socket
+
+[Service]
+Environment=DEBUG_LOGGER=--logger=files
+EnvironmentFile=-@environment_file@
+ExecStart=@libexecdir@/sssd/sssd_autofs ${DEBUG_LOGGER} --socket-activated
+# No capabilities:
+CapabilityBoundingSet=
+Restart=on-failure
+User=@SSSD_USER@
+Group=@SSSD_USER@
+@supplementary_groups@
