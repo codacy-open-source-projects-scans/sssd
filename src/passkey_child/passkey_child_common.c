@@ -23,7 +23,6 @@
 */
 
 #include <popt.h>
-#include <sys/prctl.h>
 #include <fido/param.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -35,6 +34,7 @@
 #include "util/debug.h"
 #include "util/util.h"
 #include "util/crypto/sss_crypto.h"
+#include "util/sss_prctl.h"
 
 #include "passkey_child.h"
 
@@ -130,6 +130,7 @@ parse_arguments(TALLOC_CTX *mem_ctx, int argc, const char *argv[],
     int opt;
     int dumpable = 1;
     int backtrace = 1;
+    long dummy = 0;
     int debug_fd = -1;
     char *user_verification = NULL;
     char *public_keys = NULL;
@@ -166,6 +167,8 @@ parse_arguments(TALLOC_CTX *mem_ctx, int argc, const char *argv[],
          _("Allow core dumps"), NULL },
         {"backtrace", 0, POPT_ARG_INT, &backtrace, 0,
          _("Enable debug backtrace"), NULL },
+        {"chain-id", 0, POPT_ARG_LONG, &dummy,
+         0, _("Tevent chain ID used for logging purposes"), NULL},
         {"debug-fd", 0, POPT_ARG_INT, &debug_fd, 0,
          _("An open file descriptor for the debug logs"), NULL},
         SSSD_LOGGER_OPTS
@@ -276,7 +279,7 @@ parse_arguments(TALLOC_CTX *mem_ctx, int argc, const char *argv[],
 
     poptFreeContext(pc);
 
-    prctl(PR_SET_DUMPABLE, (dumpable == 0) ? 0 : 1);
+    sss_prctl_set_dumpable((dumpable == 0) ? 0 : 1);
 
     if (user_verification != NULL) {
         if (strcmp(user_verification, "true") == 0) {

@@ -91,17 +91,10 @@
 #define CONFDB_RESPONDER_GET_DOMAINS_TIMEOUT "get_domains_timeout"
 #define CONFDB_RESPONDER_CLI_IDLE_TIMEOUT "client_idle_timeout"
 #define CONFDB_RESPONDER_CLI_IDLE_DEFAULT_TIMEOUT 60
-#define CONFDB_RESPONDER_LOCAL_NEG_TIMEOUT "local_negative_timeout"
-#define CONFDB_RESPONDER_LOCAL_NEG_TIMEOUT_DEFAULT 14400
 #define CONFDB_RESPONDER_IDLE_TIMEOUT "responder_idle_timeout"
 #define CONFDB_RESPONDER_IDLE_DEFAULT_TIMEOUT 300
 #define CONFDB_RESPONDER_CACHE_FIRST "cache_first"
-#ifdef BUILD_FILES_PROVIDER
-/* There is a subtile issue with this option when 'files' + another domain is enabled */
-#define CONFDB_RESPONDER_CACHE_FIRST_DEFAILT false
-#else
-#define CONFDB_RESPONDER_CACHE_FIRST_DEFAILT true
-#endif
+#define CONFDB_RESPONDER_CACHE_FIRST_DEFAULT true
 
 /* NSS */
 #define CONFDB_NSS_CONF_ENTRY "config/nss"
@@ -175,16 +168,6 @@
 
 /* SSH */
 #define CONFDB_SSH_CONF_ENTRY "config/ssh"
-#ifdef BUILD_SSH_KNOWN_HOSTS_PROXY
-/****************************************************************************
- * Don't forget to update src/config/cfg_rules.ini when these options are
- * definitively removed.
- ****************************************************************************/
-#define CONFDB_SSH_HASH_KNOWN_HOSTS "ssh_hash_known_hosts"
-#define CONFDB_DEFAULT_SSH_HASH_KNOWN_HOSTS false
-#define CONFDB_SSH_KNOWN_HOSTS_TIMEOUT "ssh_known_hosts_timeout"
-#define CONFDB_DEFAULT_SSH_KNOWN_HOSTS_TIMEOUT 180
-#endif
 #define CONFDB_SSH_CA_DB "ca_db"
 #define CONFDB_DEFAULT_SSH_CA_DB SYSCONFDIR"/sssd/pki/sssd_auth_ca_db.pem"
 #define CONFDB_SSH_USE_CERT_KEYS "ssh_use_certificate_keys"
@@ -231,8 +214,6 @@
 #define CONFDB_DOMAIN_TIMEOUT "timeout"
 #define CONFDB_DOMAIN_ATTR "cn"
 #define CONFDB_DOMAIN_ENUMERATE "enumerate"
-#define CONFDB_SUBDOMAIN_ENUMERATE "subdomain_enumerate"
-#define CONFDB_DEFAULT_SUBDOMAIN_ENUMERATE "none"
 #define CONFDB_DOMAIN_MINID "min_id"
 #define CONFDB_DOMAIN_MAXID "max_id"
 #define CONFDB_DOMAIN_CACHE_CREDS "cache_credentials"
@@ -282,13 +263,6 @@
 #define CONFDB_PROXY_PAM_TARGET "proxy_pam_target"
 #define CONFDB_PROXY_FAST_ALIAS "proxy_fast_alias"
 #define CONFDB_PROXY_MAX_CHILDREN "proxy_max_children"
-
-#ifdef BUILD_FILES_PROVIDER
-/* Files Provider */
-#define CONFDB_FILES_PASSWD "passwd_files"
-#define CONFDB_FILES_GROUP "group_files"
-#define CONFDB_DOMAIN_FALLBACK_TO_NSS "fallback_to_nss"
-#endif
 
 /* KCM Service */
 #define CONFDB_KCM_CONF_ENTRY "config/kcm"
@@ -347,12 +321,6 @@ enum sss_domain_state {
      * return cached data
      */
     DOM_INACTIVE,
-    /** Domain is being updated. Responders should ignore cached data and
-     * always contact the DP
-     */
-#ifdef BUILD_FILES_PROVIDER
-    DOM_INCONSISTENT,
-#endif /* BUILD_FILES_PROVIDER */
 };
 
 /** Whether the domain only supports looking up POSIX entries */
@@ -384,7 +352,6 @@ struct sss_domain_info {
     char *provider;
     int timeout;
     bool enumerate;
-    char **sd_enumerate;
     bool fqnames;
     enum sss_domain_mpg_mode mpg_mode;
     bool ignore_group_members;
@@ -404,6 +371,9 @@ struct sss_domain_info {
     const char *homedir_substr;
     const char *override_shell;
     const char *default_shell;
+    /* Domain specific ID override template attributes */
+    const char *template_homedir;
+    const char *template_shell;
 
     uint32_t user_timeout;
     uint32_t group_timeout;
@@ -433,6 +403,7 @@ struct sss_domain_info {
     char *dns_name;
     char *domain_id;
     uint32_t trust_direction;
+    uint32_t trust_type;
     struct timeval subdomains_last_checked;
 
     bool has_views;
@@ -442,9 +413,6 @@ struct sss_domain_info {
     struct sss_domain_info *next;
 
     enum sss_domain_state state;
-#ifdef BUILD_FILES_PROVIDER
-    bool fallback_to_nss;
-#endif
     char **sd_inherit;
 
     /* Do not use the forest pointer directly in new code, but rather the

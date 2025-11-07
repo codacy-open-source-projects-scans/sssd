@@ -27,7 +27,6 @@
 #include "providers/be_netlink.h"
 #include "providers/be_refresh.h"
 #include "providers/data_provider/dp.h"
-#include "util/child_common.h"
 #include "util/session_recording.h"
 #include "db/sysdb.h"
 
@@ -56,6 +55,7 @@ struct be_svc_data {
 
     char *last_good_srv;
     int last_good_port;
+    int last_good_family;
     time_t last_status_change;
     bool run_callbacks;
 

@@ -17,9 +17,6 @@ AUTOFS_CONDS = ;with_autofs
 endif
 if BUILD_SSH
 SSH_CONDS = ;with_ssh
-if BUILD_SSH_KNOWN_HOSTS_PROXY
-SSH_KNOWN_HOSTS_PROXY_CONDS = ;with_ssh_known_hosts_proxy
-endif
 endif
 if BUILD_PAC_RESPONDER
 PAC_RESPONDER_CONDS = ;with_pac_responder
@@ -50,33 +47,20 @@ endif
 if BUILD_PASSKEY
 PASSKEY_CONDS = ;build_passkey
 endif
-if BUILD_FILES_PROVIDER
-FILES_PROVIDER_CONDS = ;with_files_provider
-else
-FILES_PROVIDER_CONDS = ;without_files_provider
-endif
-if BUILD_EXTENDED_ENUMERATION_SUPPORT
-ENUM_CONDS = ;with_ext_enumeration
-else
-ENUM_CONDS = ;without_ext_enumeration
-endif
-if BUILD_ALLOW_REMOTE_DOMAIN_LOCAL_GROUPS
-AD_CONDS = ;with_allow_remote_domain_local_groups
-endif
 if SSSD_NON_ROOT_USER
 SSSD_NON_ROOT_USER_CONDS = ;with_non_root_user_support
-if BUILD_CONF_SERVICE_USER_SUPPORT
-SSSD_CONF_SERVICE_USER_CONDS = ;with_conf_service_user_support
-endif
 else
 SSSD_NON_ROOT_USER_CONDS = ;without_non_root_user_support
 endif
 if HAVE_LIBNL
 LIBNL_CONDS = ;have_libnl
 endif
+if BUILD_ID_PROVIDER_IDP
+IDP_CONDS = ;with_idp_provider
+endif
 
 
-CONDS = with_false$(SUDO_CONDS)$(AUTOFS_CONDS)$(SSH_CONDS)$(SSH_KNOWN_HOSTS_PROXY_CONDS)$(PAC_RESPONDER_CONDS)$(GPO_CONDS)$(SYSTEMD_CONDS)$(KCM_CONDS)$(STAP_CONDS)$(KCM_RENEWAL_CONDS)$(LOCKFREE_CLIENT_CONDS)$(HAVE_INOTIFY_CONDS)$(PASSKEY_CONDS)$(FILES_PROVIDER_CONDS)$(SSSD_NON_ROOT_USER_CONDS)$(SSSD_CONF_SERVICE_USER_CONDS)$(ENUM_CONDS)$(LIBNL_CONDS)$(AD_CONDS)
+CONDS = with_false$(SUDO_CONDS)$(AUTOFS_CONDS)$(SSH_CONDS)$(PAC_RESPONDER_CONDS)$(GPO_CONDS)$(SYSTEMD_CONDS)$(KCM_CONDS)$(STAP_CONDS)$(KCM_RENEWAL_CONDS)$(LOCKFREE_CLIENT_CONDS)$(HAVE_INOTIFY_CONDS)$(PASSKEY_CONDS)$(SSSD_NON_ROOT_USER_CONDS)$(LIBNL_CONDS)$(IDP_CONDS)
 
 
 #Special Rules:
@@ -106,9 +90,6 @@ endif
 if BUILD_SSH
 man_MANS += sss_ssh_authorizedkeys.1 \
             sss_ssh_knownhosts.1
-if BUILD_SSH_KNOWN_HOSTS_PROXY
-man_MANS += sss_ssh_knownhostsproxy.1
-endif
 endif
 
 if BUILD_SUDO
@@ -127,10 +108,8 @@ if BUILD_NFS_IDMAP
 man_MANS += sss_rpcidmapd.5
 endif
 
-if HAVE_INOTIFY
-if BUILD_FILES_PROVIDER
-man_MANS += sssd-files.5
-endif # BUILD_FILES_PROVIDER
+if BUILD_ID_PROVIDER_IDP
+man_MANS += sssd-idp.5
 endif
 
 $(builddir)/src/man/sssd_user_name.include:

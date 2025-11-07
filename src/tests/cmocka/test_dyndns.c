@@ -239,7 +239,7 @@ void dyndns_test_get_ifaddr(void **state)
     will_return_getifaddrs("eth0", "192.168.0.1", AF_INET);
     will_return_getifaddrs("eth1", "192.168.0.2", AF_INET);
     will_return_getifaddrs(NULL, NULL, 0); /* sentinel */
-    ret = sss_iface_addr_list_get(dyndns_test_ctx, "eth0", &addrlist);
+    ret = sss_iface_addr_list_get(dyndns_test_ctx, "eth0", NULL, &addrlist);
     assert_int_equal(ret, EOK);
 
     /* There must be only one address with the correct value */
@@ -269,7 +269,7 @@ void dyndns_test_get_multi_ifaddr(void **state)
     will_return_getifaddrs("eth0", "192.168.0.2", AF_INET);
     will_return_getifaddrs("eth0", "192.168.0.1", AF_INET);
     will_return_getifaddrs(NULL, NULL, 0); /* sentinel */
-    ret = sss_iface_addr_list_get(dyndns_test_ctx, "eth0", &addrlist);
+    ret = sss_iface_addr_list_get(dyndns_test_ctx, "eth0", NULL, &addrlist);
     assert_int_equal(ret, EOK);
 
     sss_if_addr = addrlist;
@@ -311,12 +311,112 @@ void dyndns_test_get_ifaddr_enoent(void **state)
     will_return_getifaddrs("eth1", "192.168.0.2", AF_INET);
     will_return_getifaddrs(NULL, NULL, 0); /* sentinel */
     ret = sss_iface_addr_list_get(dyndns_test_ctx, "non_existing_interface",
-                                  &addrlist);
+                                  NULL, &addrlist);
     assert_int_equal(ret, ENOENT);
     talloc_free(addrlist);
 
     assert_true(check_leaks_pop(dyndns_test_ctx) == true);
 }
+
+static int ifaddr_list_size(struct sss_iface_addr *list)
+{
+    struct sss_iface_addr *p = list;
+    size_t s = 0;
+    while (p) {
+        s++;
+        p = p->next;
+    }
+    return s;
+}
+
+void dyndns_test_get_ifaddr_pattern(void **state)
+{
+    errno_t ret;
+    struct sss_iface_addr *addrlist;
+    struct pattern {
+        const char *pattern;
+        int count;
+    } patterns[] = {
+        {"*", 5},
+        {"eth*", 4},
+        {"eth?", 3},
+        {"eth[12]", 2},
+        {"*vpn*", 1},
+        {"!eth1, eth*", 3},
+        {"!  eth1*, eth*", 2},
+        {NULL, 0}
+    };
+    int i;
+
+    check_leaks_push(dyndns_test_ctx);
+
+    for (i = 0; patterns[i].pattern != NULL; ++i) {
+        will_return_getifaddrs("eth0", "192.168.0.1", AF_INET);
+        will_return_getifaddrs("eth1", "192.168.0.2", AF_INET);
+        will_return_getifaddrs("eth2", "192.168.0.3", AF_INET);
+        will_return_getifaddrs("eth10", "192.168.0.4", AF_INET);
+        will_return_getifaddrs("vpn1", "192.168.0.5", AF_INET);
+        will_return_getifaddrs(NULL, NULL, 0); /* sentinel */
+        ret = sss_iface_addr_list_get(dyndns_test_ctx, patterns[i].pattern,
+                                      NULL,
+                                      &addrlist);
+        assert_int_equal(ret, EOK);
+        assert_int_equal(ifaddr_list_size (addrlist), patterns[i].count);
+        talloc_free(addrlist);
+    }
+
+    assert_true(check_leaks_pop(dyndns_test_ctx) == true);
+}
+
+void dyndns_test_get_network_pattern(void **state)
+{
+    errno_t ret;
+    int i;
+    struct sss_iface_addr *addrlist;
+    struct pattern {
+        const char *pattern;
+        int count;
+    } patterns[] = {
+        {"10.0.0.0/8", 3},
+        {"0.0.0.0/0", 3},
+        {"!0.0.0.0/0", 0},
+        {"192.168.0.0/24", 0},
+        {"0.0.0.0/0, !10.0.1.0/24", 2},
+        {"10.0.0.0/24", 1},
+        {"10.0.0.0/23", 2},
+        {"! 10.0.0.2, 10.0.0.0/8", 2},
+        {"::0/0, 0.0.0.0/0", 4},
+        {"cafe::0/32, 10.0.0.0/28", 2},
+        /* invalid filter => no updates */
+        {"noaddress", 0},
+        {"!noaddress", 0},
+        {"!! 10.0.0.0/8", 0},
+        {NULL, 0}
+    };
+
+    check_leaks_push(dyndns_test_ctx);
+
+    for (i = 0; patterns[i].pattern != NULL; ++i) {
+        will_return_getifaddrs("eth0", "10.0.0.2", AF_INET);
+        will_return_getifaddrs("eth1", "10.0.1.2", AF_INET);
+        will_return_getifaddrs("eth2", "10.0.2.2", AF_INET);
+        will_return_getifaddrs("eth3", "cafe::2", AF_INET6);
+        will_return_getifaddrs(NULL, NULL, 0); /* sentinel */
+        ret = sss_iface_addr_list_get(dyndns_test_ctx, NULL,
+                                      patterns[i].pattern,
+                                      &addrlist);
+        if (patterns[i].count == 0) {
+            assert_int_not_equal(ret, EOK);
+        } else {
+            assert_int_equal(ret, EOK);
+            assert_int_equal(ifaddr_list_size (addrlist), patterns[i].count);
+            talloc_free(addrlist);
+        }
+    }
+
+    assert_true(check_leaks_pop(dyndns_test_ctx) == true);
+}
+
 
 void dyndns_test_addr_list_as_str_list(void **state)
 {
@@ -342,7 +442,7 @@ void dyndns_test_addr_list_as_str_list(void **state)
     }
     will_return_getifaddrs(NULL, NULL, 0); /* sentinel */
 
-    ret = sss_iface_addr_list_get(dyndns_test_ctx, "eth0", &addrlist);
+    ret = sss_iface_addr_list_get(dyndns_test_ctx, "eth0", NULL, &addrlist);
     assert_int_equal(ret, EOK);
 
     ret = sss_iface_addr_list_as_str_list(dyndns_test_ctx, addrlist, &output);
@@ -382,6 +482,7 @@ void dyndns_test_create_fwd_msg(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.2");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -523,6 +624,7 @@ void dyndns_test_create_fwd_msg_mult(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.2");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -568,6 +670,7 @@ void dyndns_test_create_fwd_msg_A(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.2");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -612,6 +715,7 @@ void dyndns_test_create_fwd_msg_AAAA(void **state)
     assert_int_equal(ret, 1);
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -657,6 +761,7 @@ void dyndns_test_create_ptr_msg(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.2");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -727,6 +832,7 @@ void dyndns_test_dualstack(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.2");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -788,6 +894,7 @@ void dyndns_test_dualstack_multiple_addresses(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.2");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, EOK);
 
@@ -863,6 +970,7 @@ void dyndns_test_dualstack_no_iface(void **state)
     sin.sin_addr.s_addr = inet_addr ("192.168.0.3");
     ret = sss_get_dualstack_addresses(dyndns_test_ctx,
                                       (struct sockaddr *) &sin,
+                                      NULL,
                                       &addrlist);
     assert_int_equal(ret, ENOENT);
 
@@ -1040,6 +1148,12 @@ int main(int argc, const char *argv[])
                                         dyndns_test_simple_setup,
                                         dyndns_test_teardown),
         cmocka_unit_test_setup_teardown(dyndns_test_get_ifaddr_enoent,
+                                        dyndns_test_simple_setup,
+                                        dyndns_test_teardown),
+        cmocka_unit_test_setup_teardown(dyndns_test_get_ifaddr_pattern,
+                                        dyndns_test_simple_setup,
+                                        dyndns_test_teardown),
+        cmocka_unit_test_setup_teardown(dyndns_test_get_network_pattern,
                                         dyndns_test_simple_setup,
                                         dyndns_test_teardown),
         cmocka_unit_test_setup_teardown(dyndns_test_addr_list_as_str_list,

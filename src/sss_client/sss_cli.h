@@ -25,6 +25,8 @@
 #ifndef _SSSCLI_H
 #define _SSSCLI_H
 
+#include "config.h"
+
 #include <nss.h>
 #include <pwd.h>
 #include <grp.h>
@@ -38,11 +40,16 @@
 #ifndef HAVE_ERRNO_T
 #define HAVE_ERRNO_T
 typedef int errno_t;
+#else
+#include <errno.h>
 #endif
-
 
 #ifndef EOK
 #define EOK 0
+#endif
+
+#ifndef NETDB_INTERNAL
+#define NETDB_INTERNAL (-1)
 #endif
 
 #define SSS_NSS_PROTOCOL_VERSION 1
@@ -388,6 +395,9 @@ enum sss_authtok_type {
     SSS_AUTHTOK_TYPE_PASSKEY_REPLY = 0x0010, /**< Authentication token contains
                                               * Passkey reply data presented as
                                               * a kerberos challenge answer */
+    SSS_AUTHTOK_TYPE_PAM_STACKED = 0x0011, /**< Authentication token contains
+                                            * either 2FA_SINGLE or PASSWORD
+                                            * via PAM use_first_pass */
 };
 
 /**
@@ -425,6 +435,7 @@ enum pam_item_type {
 #define PAM_CLI_FLAGS_PROMPT_ALWAYS (1 << 7)
 #define PAM_CLI_FLAGS_TRY_CERT_AUTH (1 << 8)
 #define PAM_CLI_FLAGS_REQUIRE_CERT_AUTH (1 << 9)
+#define PAM_CLI_FLAGS_ALLOW_CHAUTHTOK_BY_ROOT (1 << 10)
 
 #define SSS_NSS_MAX_ENTRIES 256
 #define SSS_NSS_HEADER_SIZE (sizeof(uint32_t) * 4)

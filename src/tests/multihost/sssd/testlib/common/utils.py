@@ -128,7 +128,6 @@ class sssdTools(object):
             "authselect",
             "authconfig",
             "firewalld",
-            "libsss_simpleifp",
             "nss-pam-ldapd",
             "krb5-pkinit",
             "python3-libsss_nss_idmap",
@@ -173,7 +172,7 @@ class sssdTools(object):
             "libsss_autofs sssd-kcm sssd-dbus"
         )
         # See comment in client_install_pkgs
-        standalalone_pkgs = ["authselect", "authconfig", "libsss_simpleifp"]
+        standalalone_pkgs = ["authselect", "authconfig"]
         distro = self.multihost.distro
         if "8." in distro:
             enable_idm = "yum module enable idm:DL1 -y"
@@ -378,6 +377,16 @@ class sssdTools(object):
             self.config_etckrb5(realm, krb_server)
             self.enable_kcm()
 
+
+    def update_remote_conf(self, conffile, section, parameters, action='add'):
+        """ Update configuration files on remote host """
+        tmpconf = tempfile.NamedTemporaryFile(suffix='remote.conf', delete=False)
+        self.multihost.transport.get_file(conffile, tmpconf.name)
+        self.update_conf(tmpconf.name, section, parameters, action)
+        self.multihost.transport.put_file(tmpconf.name, conffile)
+        os.unlink(tmpconf.name)
+
+
     def update_conf(self, conffile, section, parameters, action='add'):
         """ Update configuration files """
         config = ConfigParser.RawConfigParser(delimiters=('='))
@@ -550,6 +559,8 @@ class sssdTools(object):
         # joining again and the error in log is misleading.
         cmd = self.multihost.run_command(
             f'realm leave {domainname} -v', log_stdout=raiseonerr, raiseonerr=False)
+        # Remove the keytab file to avoid the issue unexpected entries in keytab
+        self.multihost.run_command("rm -f /etc/krb5.keytab", raiseonerr=False)
         if cmd.returncode != 0 and "realm: Couldn't connect to realm service" in cmd.stderr_text:
             print("WARNING: realm leave timed out, retrying!")
             self.service_ctrl('restart', 'realmd')
@@ -1150,13 +1161,22 @@ class sssdTools(object):
     def add_service_principals(self, spn_list):
         """ Add service principal to Windows AD """
         host = self.multihost.sys_hostname
+        res = self.multihost.run_command("net ads keytab --help")
+        has_add_update_ads = "add_update_ads" in res.stdout_text
+        if has_add_update_ads:
+            cmd = "net ads keytab add_update_ads"
+        else:
+            cmd = "net ads setspn add"
         for spn in spn_list:
-            cmd = "net ads keytab add_update_ads %s/%s "\
-                  "-U %s " % (spn, host, self.admin_user,)
             try:
-                self.multihost.run_command(cmd, stdin_text='Secret123')
+                self.multihost.run_command(f"{cmd} {spn}/{host} -U {self.admin_user}", stdin_text='Secret123')
             except subprocess.CalledProcessError:
                 pytest.fail("Failed to add %s Service principal" % (spn))
+
+        self.multihost.run_command("cat /etc/samba/smb.conf", raiseonerr=False)
+
+        if not has_add_update_ads:
+            self.multihost.run_command(f"net ads keytab create -U {self.admin_user}", stdin_text='Secret123')
 
     def remove_service_principals(self, spn_list):
         """ Remove service principal from AD """
@@ -2313,4 +2333,3 @@ class ADDNS(object):  # pylint: disable=useless-object-inheritance
             net = str(ip.split(".")[2]) + '.' + str(ip.split(".")[1]) + '.' + str(ip.split(".")[0]) + '.in-addr.arpa'
             ptr = str(ip.split(".")[3])
             self.ad_host.run_command(f"dnscmd.exe /recorddelete {net} {ptr} PTR /f", raiseonerr=False)
-

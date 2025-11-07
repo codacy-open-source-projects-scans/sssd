@@ -46,7 +46,6 @@
 #include "providers/fail_over.h"
 #include "providers/be_refresh.h"
 #include "providers/be_ptask.h"
-#include "util/child_common.h"
 #include "util/file_watch.h"
 #include "resolv/async_resolv.h"
 #include "sss_iface/sss_iface_async.h"
@@ -223,12 +222,9 @@ static void be_mark_subdom_offline(struct sss_domain_info *subdom,
     tv = tevent_timeval_current_ofs(reset_status_timeout, 0);
 
     switch (subdom->state) {
-#ifdef BUILD_FILES_PROVIDER
-    case DOM_INCONSISTENT:
-#endif /* BUILD_FILES_PROVIDER */
     case DOM_DISABLED:
         DEBUG(SSSDBG_MINOR_FAILURE,
-              "Won't touch disabled or inconsistent subdomain\n");
+              "Won't touch disabled subdomain\n");
         return;
     case DOM_INACTIVE:
         DEBUG(SSSDBG_TRACE_ALL, "Subdomain already inactive\n");

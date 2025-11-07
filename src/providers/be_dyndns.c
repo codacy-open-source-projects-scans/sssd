@@ -27,12 +27,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <ifaddrs.h>
+#include <fnmatch.h>
 #include <ctype.h>
 #include "util/debug.h"
 #include "util/util.h"
+#include "util/strtonum.h"
 #include "confdb/confdb.h"
 #include "util/child_common.h"
 #include "providers/data_provider.h"
@@ -43,9 +46,6 @@
 #ifndef DYNDNS_TIMEOUT
 #define DYNDNS_TIMEOUT 15
 #endif /* DYNDNS_TIMEOUT */
-
-/* MASK represents special value for matching all interfaces */
-#define MASK "*"
 
 struct sss_iface_addr {
     struct sss_iface_addr *next;
@@ -189,14 +189,223 @@ static bool supported_address_family(sa_family_t sa_family)
     return sa_family == AF_INET || sa_family == AF_INET6;
 }
 
-static bool matching_name(const char *ifname, const char *ifname2)
+static bool matching_name(const char *ifname, char **ifname_patterns)
 {
-    return (strcmp(MASK, ifname) == 0) || (strcasecmp(ifname, ifname2) == 0);
+    const char *name;
+    bool negative;
+    int i;
+
+    if (ifname_patterns == NULL) {
+        /* no filter, accept this interface */
+        return true;
+    }
+
+    for (i = 0; ifname_patterns[i] != NULL; ++i) {
+        name = ifname_patterns[i];
+        negative = (name[0] == '!');
+        if (negative) {
+            ++name;
+            while (isspace(name[0])) { ++name; }
+        }
+
+        if (fnmatch(name, ifname, 0) == 0) {
+            return !negative;
+        }
+    }
+
+    /* no match found, exlude this interface */
+    return false;
+}
+
+struct network_pattern {
+    sa_family_t family;
+    uint8_t address_bytes[sizeof(struct in6_addr)];
+    bool negative;
+    uint32_t prefix;
+};
+
+static int convert_network_pattern(const char *network,
+                                   struct network_pattern *pattern)
+{
+    char buffer[INET6_ADDRSTRLEN + 4]; /* address + \0 + "/128" */
+    char *prefix_str;
+    const char *network_str;
+
+    if (!network || !pattern) {
+        return EINVAL;
+    }
+
+    /* family */
+    pattern->family = strchr(network, ':') ? AF_INET6 : AF_INET;
+
+    /* negative */
+    network_str = network;
+    pattern->negative = (*network_str == '!');
+    if (pattern->negative) {
+        ++network_str;
+        while (isspace(*network_str)) {
+            ++network_str;
+        }
+    }
+
+    /* prefix */
+    if (strlen(network_str) >= sizeof(buffer)) {
+        return EINVAL;
+    }
+    strcpy(buffer, network_str);
+    prefix_str = strchr (buffer, '/');
+    if (prefix_str == NULL) {
+        /* No prefix length specified, assume /32 for IPv4 and /128 for IPv6 */
+        pattern->prefix = (pattern->family == AF_INET) ? 32 : 128;
+    } else {
+        *prefix_str = 0;
+        ++prefix_str;
+        pattern->prefix = strtouint32(prefix_str, NULL, 10);
+        if (errno != 0 ||
+            (pattern->family == AF_INET && pattern->prefix > 32) ||
+            (pattern->family == AF_INET6 && pattern->prefix > 128)
+            ) {
+            return EINVAL;
+        }
+    }
+
+    /* address */
+    if (inet_pton(pattern->family, buffer, &(pattern->address_bytes)) != 1) {
+        return EINVAL;
+    }
+
+    return 0;
+}
+
+static int
+create_network_patterns_list(TALLOC_CTX *ctx, const char *network_filter,
+                             struct network_pattern ***_list)
+{
+    char **network_filter_list = NULL;
+    struct network_pattern **result = NULL;
+    int ret;
+    int size;
+    int i;
+
+    ret = split_on_separator (ctx, network_filter, ',', true, true,
+                              &network_filter_list, &size);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Could not parse network list filter\n");
+        goto done;
+    }
+
+    result = talloc_array(ctx, struct network_pattern *, size + 1);
+    if (result == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
+
+    result[size] = NULL;
+    for (i = 0; i < size; i++) {
+        result[i] = talloc(result, struct network_pattern);
+        if (result[i] == NULL) {
+            ret = ENOMEM;
+            goto done;
+        }
+
+        ret = convert_network_pattern(network_filter_list[i], result[i]);
+        if (ret != 0) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Could not parse network address [%s]\n",
+                  network_filter_list[i]);
+            goto done;
+        }
+    }
+ done:
+    if (ret != 0) {
+        talloc_zfree(result);
+    }
+    talloc_free(network_filter_list);
+
+    *_list = result;
+    return ret;
+}
+
+
+static bool sockaddr_match_pattern(struct sockaddr *address,
+                                   struct network_pattern *network)
+{
+    int bytes, bits, i;
+    uint8_t mask;
+    const uint8_t *ip_bytes;
+    struct sockaddr_in *ipv4sock = (struct sockaddr_in *)address;
+    struct sockaddr_in6 *ipv6sock = (struct sockaddr_in6 *)address;
+
+    if (address->sa_family != network->family) {
+        return false;
+    }
+
+    switch (address->sa_family) {
+    case AF_INET:
+        ip_bytes = (uint8_t *)&(ipv4sock->sin_addr.s_addr);
+        break;
+    case AF_INET6:
+        ip_bytes = (uint8_t *)&(ipv6sock->sin6_addr);
+        break;
+    default:
+        return false;
+    }
+
+    bytes = network->prefix / 8;
+    bits = network->prefix % 8;
+
+    for (i = 0; i < bytes; i++) {
+        if (ip_bytes[i] != network->address_bytes[i]) {
+            return false;
+        }
+    }
+
+    if (bits) {
+        mask = 0xFF << (8 - bits);
+        if ((ip_bytes[bytes] & mask) != (network->address_bytes[bytes] & mask)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool matching_ip(struct sockaddr *address,
+                        struct network_pattern **network_patterns)
+{
+    struct network_pattern *winner = NULL;
+    int i;
+
+    if (network_patterns == NULL) {
+        /* no filter, accept this address */
+        return true;
+    }
+
+    for (i = 0; network_patterns[i] != NULL; ++i) {
+        if (sockaddr_match_pattern(address, network_patterns[i])) {
+            if (winner == NULL) {
+                winner = network_patterns[i];
+            } else {
+                if (winner->prefix < network_patterns[i]->prefix) {
+                    winner = network_patterns[i];
+                }
+            }
+        }
+    }
+
+    if (winner != NULL) {
+        return ! winner->negative;
+    }
+
+    /* no match found, exlude this address */
+    return false;
 }
 
 /* Collect IP addresses associated with an interface */
 errno_t
-sss_iface_addr_list_get(TALLOC_CTX *mem_ctx, const char *ifname,
+sss_iface_addr_list_get(TALLOC_CTX *mem_ctx, const char *ifnames_filter,
+                        const char *network_filter,
                         struct sss_iface_addr **_addrlist)
 {
     struct ifaddrs *ifaces = NULL;
@@ -205,7 +414,8 @@ sss_iface_addr_list_get(TALLOC_CTX *mem_ctx, const char *ifname,
     size_t addrsize;
     struct sss_iface_addr *address;
     struct sss_iface_addr *addrlist = NULL;
-
+    char **ifnames_filter_list = NULL;
+    struct network_pattern **network_filter_list = NULL;
     /* Get the IP addresses associated with the
      * specified interface
      */
@@ -218,14 +428,36 @@ sss_iface_addr_list_get(TALLOC_CTX *mem_ctx, const char *ifname,
         goto done;
     }
 
+    if (ifnames_filter != NULL) {
+        ret = split_on_separator (mem_ctx, ifnames_filter, ',', true, true,
+                                  &ifnames_filter_list, NULL);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Could not parse interface names filter\n");
+            goto done;
+        }
+    }
+
+    if (network_filter != NULL) {
+        ret = create_network_patterns_list(mem_ctx, network_filter,
+                                           &network_filter_list);
+        if (ret != EOK) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Could not parse network list filter\n");
+            goto done;
+        }
+    }
+
     for (ifa = ifaces; ifa != NULL; ifa = ifa->ifa_next) {
         /* Some interfaces don't have an ifa_addr */
         if (!ifa->ifa_addr) continue;
 
         /* Add IP addresses to the list */
         if (supported_address_family(ifa->ifa_addr->sa_family)
-                && matching_name(ifname, ifa->ifa_name)
+                && matching_name(ifa->ifa_name, ifnames_filter_list)
                 && ok_for_dns(ifa->ifa_addr)) {
+
+            if (!matching_ip(ifa->ifa_addr, network_filter_list)) continue;
 
             /* Add this address to the IP address list */
             address = talloc_zero(mem_ctx, struct sss_iface_addr);
@@ -258,12 +490,16 @@ sss_iface_addr_list_get(TALLOC_CTX *mem_ctx, const char *ifname,
     } else {
         /* No result was found */
         DEBUG(SSSDBG_TRACE_FUNC,
-              "No IP usable for DNS was found for interface: %s.\n", ifname);
+              "No IP usable for DNS was found for interface filter "
+              "[%s] and ip filter [%s].\n", ifnames_filter, network_filter);
         ret = ENOENT;
+        *_addrlist = NULL;
     }
 
 done:
     freeifaddrs(ifaces);
+    talloc_free(ifnames_filter_list);
+    talloc_free(network_filter_list);
     return ret;
 }
 
@@ -799,10 +1035,8 @@ nsupdate_get_addrs_recv(struct tevent_req *req,
  */
 struct nsupdate_child_state {
     struct tevent_context *ev;
-    int pipefd_to_child;
-    int pipefd_from_child;
+    struct child_io_fds *io;
     struct tevent_timer *timeout_handler;
-    struct sss_child_ctx_old *child_ctx;
     bool read_done;
     bool process_finished;
     errno_t result;
@@ -825,45 +1059,32 @@ void nsupdate_child_read_done(struct tevent_req *subreq);
 static struct tevent_req *
 nsupdate_child_send(TALLOC_CTX *mem_ctx,
                     struct tevent_context *ev,
-                    int pipefd_to_child,
-                    int pipefd_from_child,
-                    pid_t child_pid,
+                    const char **args,
                     char *child_stdin)
 {
     errno_t ret;
     struct tevent_req *req;
     struct tevent_req *subreq;
     struct nsupdate_child_state *state;
-    struct timeval tv;
 
     req = tevent_req_create(mem_ctx, &state, struct nsupdate_child_state);
     if (req == NULL) {
-        close(pipefd_to_child);
         return NULL;
     }
 
     state->ev = ev;
-    state->pipefd_to_child = pipefd_to_child;
-    state->pipefd_from_child = pipefd_from_child;
     state->read_done = false;
     state->process_finished = false;
     state->result = ERR_DYNDNS_FAILED;
 
-    /* Set up SIGCHLD handler */
-    ret = child_handler_setup(ev, child_pid, nsupdate_child_handler, req,
-                              &state->child_ctx);
+    ret = sss_child_start(state, ev,
+                          NSUPDATE_PATH, args, true,
+                          NULL, STDERR_FILENO,
+                          nsupdate_child_handler, req,
+                          DYNDNS_TIMEOUT, nsupdate_child_timeout, req, true,
+                          &(state->io));
     if (ret != EOK) {
-        DEBUG(SSSDBG_OP_FAILURE, "Could not set up child handlers [%d]: %s\n",
-              ret, sss_strerror(ret));
-        ret = ERR_DYNDNS_FAILED;
-        goto done;
-    }
-
-    /* Set up timeout handler */
-    tv = tevent_timeval_current_ofs(DYNDNS_TIMEOUT, 0);
-    state->timeout_handler = tevent_add_timer(ev, req, tv,
-                                              nsupdate_child_timeout, req);
-    if(state->timeout_handler == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "sss_child_start() failed\n");
         ret = ERR_DYNDNS_FAILED;
         goto done;
     }
@@ -872,7 +1093,7 @@ nsupdate_child_send(TALLOC_CTX *mem_ctx,
     subreq = write_pipe_send(req, ev,
                              (uint8_t *) child_stdin,
                              strlen(child_stdin)+1,
-                             state->pipefd_to_child);
+                             state->io->write_to_child_fd);
     if (subreq == NULL) {
         ret = ERR_DYNDNS_FAILED;
         goto done;
@@ -899,8 +1120,6 @@ nsupdate_child_timeout(struct tevent_context *ev,
             tevent_req_data(req, struct nsupdate_child_state);
 
     DEBUG(SSSDBG_CRIT_FAILURE, "Timeout reached for dynamic DNS update\n");
-    child_handler_destroy(state->child_ctx);
-    state->child_ctx = NULL;
     state->child_status = ETIMEDOUT;
     tevent_req_error(req, ERR_DYNDNS_TIMEOUT);
 }
@@ -921,7 +1140,7 @@ nsupdate_child_stdin_done(struct tevent_req *subreq)
 
     ret = write_pipe_recv(subreq);
     talloc_zfree(subreq);
-    PIPE_FD_CLOSE(state->pipefd_to_child);
+    FD_CLOSE(state->io->write_to_child_fd);
 
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE, "Sending nsupdate data failed [%d]: %s\n",
@@ -930,7 +1149,7 @@ nsupdate_child_stdin_done(struct tevent_req *subreq)
         return;
     }
 
-    subreq = read_pipe_send(state, state->ev, state->pipefd_from_child);
+    subreq = read_pipe_send(state, state->ev, state->io->read_from_child_fd);
     if (subreq == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "read_pipe_send failed.\n");
         tevent_req_error(req, ERR_DYNDNS_FAILED);
@@ -957,7 +1176,7 @@ void nsupdate_child_read_done(struct tevent_req *subreq)
 
     ret = read_pipe_recv(subreq, state, &buf, &buf_len);
     talloc_zfree(subreq);
-    PIPE_FD_CLOSE(state->pipefd_from_child);
+    FD_CLOSE(state->io->read_from_child_fd);
     if (ret != EOK) {
         tevent_req_error(req, ret);
         return;
@@ -1028,8 +1247,6 @@ nsupdate_child_recv(struct tevent_req *req, int *child_status)
 
     *child_status = state->child_status;
 
-    PIPE_FD_CLOSE(state->pipefd_to_child);
-
     TEVENT_REQ_RETURN_ON_ERROR(req);
 
     return ERR_OK;
@@ -1061,9 +1278,6 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
                                     const char *dot_cert,
                                     const char *dot_key)
 {
-    int pipefd_to_child[2] = PIPE_INIT;
-    int pipefd_from_child[2] = PIPE_INIT;
-    pid_t child_pid;
     errno_t ret;
     struct tevent_req *req = NULL;
     struct tevent_req *subreq = NULL;
@@ -1076,21 +1290,6 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
     }
     state->child_status = 0;
 
-    ret = pipe(pipefd_to_child);
-    if (ret == -1) {
-        ret = errno;
-        DEBUG(SSSDBG_CRIT_FAILURE,
-              "pipe failed [%d][%s].\n", ret, strerror(ret));
-        goto done;
-    }
-    ret = pipe(pipefd_from_child);
-    if (ret == -1) {
-        ret = errno;
-        DEBUG(SSSDBG_CRIT_FAILURE,
-              "pipe (from) failed [%d][%s].\n", ret, strerror(ret));
-        goto done;
-    }
-
     args = be_nsupdate_args(state, auth_type, force_tcp,
                             server_uri, dot_cacert, dot_cert, dot_key);
     if (args == NULL) {
@@ -1098,39 +1297,18 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
-    child_pid = fork();
-
-    if (child_pid == 0) { /* child */
-        exec_child_ex(state, pipefd_to_child, pipefd_from_child, NSUPDATE_PATH,
-                      NULL, args, true, STDIN_FILENO, STDERR_FILENO);
-        DEBUG(SSSDBG_CRIT_FAILURE, "execv failed [%d][%s].\n", ret, strerror(ret));
-        goto done;
-    } else if (child_pid > 0) { /* parent */
-        PIPE_FD_CLOSE(pipefd_to_child[0]);
-        PIPE_FD_CLOSE(pipefd_from_child[1]);
-
-        /* the nsupdate_child request now owns the pipefd and is responsible
-         * for closing it
-         */
-        subreq = nsupdate_child_send(state, ev, pipefd_to_child[1],
-                                     pipefd_from_child[0],
-                                     child_pid, nsupdate_msg);
-        if (subreq == NULL) {
-            ret = ERR_DYNDNS_FAILED;
-            goto done;
-        }
-        tevent_req_set_callback(subreq, be_nsupdate_done, req);
-    } else { /* error */
-        ret = errno;
-        DEBUG(SSSDBG_CRIT_FAILURE,
-              "fork failed [%d][%s].\n", ret, strerror(ret));
+    subreq = nsupdate_child_send(state, ev, args, nsupdate_msg);
+    if (subreq == NULL) {
+        ret = ERR_DYNDNS_FAILED;
         goto done;
     }
+    tevent_req_set_callback(subreq, be_nsupdate_done, req);
+
 
     ret = EOK;
+
 done:
     if (ret != EOK) {
-        PIPE_CLOSE(pipefd_to_child);
         tevent_req_error(req, ret);
         tevent_req_post(req, ev);
     }
@@ -1342,6 +1520,7 @@ struct dp_option default_dyndns_opts[] = {
     { "dyndns_refresh_interval", DP_OPT_NUMBER, NULL_NUMBER, NULL_NUMBER },
     { "dyndns_refresh_interval_offset", DP_OPT_NUMBER, NULL_NUMBER, NULL_NUMBER },
     { "dyndns_iface", DP_OPT_STRING, NULL_STRING, NULL_STRING },
+    { "dyndns_address", DP_OPT_STRING, NULL_STRING, NULL_STRING },
     { "dyndns_ttl", DP_OPT_NUMBER, { .number = 1200 }, NULL_NUMBER },
     { "dyndns_update_ptr", DP_OPT_BOOL, BOOL_TRUE, BOOL_FALSE },
     { "dyndns_force_tcp", DP_OPT_BOOL, BOOL_FALSE, BOOL_FALSE },
@@ -1477,6 +1656,7 @@ done:
 
 errno_t sss_get_dualstack_addresses(TALLOC_CTX *mem_ctx,
                                     struct sockaddr *ss,
+                                    const char *network_filter,
                                     struct sss_iface_addr **_iface_addrs)
 {
     struct sss_iface_addr *iface_addrs;
@@ -1497,7 +1677,8 @@ errno_t sss_get_dualstack_addresses(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
-    ret = sss_iface_addr_list_get(tmp_ctx, iface_name, &iface_addrs);
+    ret = sss_iface_addr_list_get(tmp_ctx, iface_name, network_filter,
+                                  &iface_addrs);
     if (ret != EOK) {
         DEBUG(SSSDBG_MINOR_FAILURE,
               "sss_iface_addr_list_get failed: %d:[%s]\n",

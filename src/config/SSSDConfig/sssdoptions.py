@@ -58,7 +58,6 @@ class SSSDOptions(object):
         'enum_cache_timeout': _('Enumeration cache timeout length (seconds)'),
         'entry_cache_no_wait_timeout': _('Entry cache background update timeout length (seconds)'),
         'entry_negative_timeout': _('Negative cache timeout length (seconds)'),
-        'local_negative_timeout': _('Files negative cache timeout length (seconds)'),
         'filter_users': _('Users that SSSD should explicitly ignore'),
         'filter_groups': _('Groups that SSSD should explicitly ignore'),
         'filter_users_in_groups': _('Should filtered users appear in groups'),
@@ -201,6 +200,7 @@ class SSSDOptions(object):
                                       'in one update or in two separate updates'),
         'dyndns_ttl': _("The TTL to apply to the client's DNS entry after updating it"),
         'dyndns_iface': _("The interface whose IP should be used for dynamic DNS updates"),
+        'dyndns_address': _("The list of IP addresses that should be used for dynamic DNS updates"),
         'dyndns_refresh_interval': _("How often to periodically update the client's DNS entry"),
         'dyndns_refresh_interval_offset': _("Maximum period deviation when updating the client's DNS entry"),
         'dyndns_update_ptr': _("Whether the provider should explicitly update the PTR record as well"),
@@ -210,7 +210,6 @@ class SSSDOptions(object):
         'dyndns_dot_cacert': _("The file of the certificate authorities certificates for DoT"),
         'dyndns_dot_cert': _("The certificate(s) file for authentication for the DoT transport"),
         'dyndns_dot_key': _("The key file for authenticated encryption for the DoT transport"),
-        'subdomain_enumerate': _('Control enumeration of trusted domains'),
         'subdomain_refresh_interval': _('How often should subdomains list be refreshed'),
         'subdomain_refresh_interval_offset': _('Maximum period deviation when refreshing the subdomain list'),
         'subdomain_inherit': _('List of options that should be inherited into a subdomain'),
@@ -234,9 +233,6 @@ class SSSDOptions(object):
         'ipa_server': _('IPA server address'),
         'ipa_backup_server': _('Address of backup IPA server'),
         'ipa_hostname': _('IPA client hostname'),
-        'ipa_dyndns_update': _("Whether to automatically update the client's DNS entry in FreeIPA"),
-        'ipa_dyndns_ttl': _("The TTL to apply to the client's DNS entry after updating it"),
-        'ipa_dyndns_iface': _("The interface whose IP should be used for dynamic DNS updates"),
         'ipa_hbac_search_base': _("Search base for HBAC related objects"),
         'ipa_hbac_refresh': _("The amount of time between lookups of the HBAC rules against the IPA server"),
         'ipa_selinux_refresh': _("The amount of time in seconds between lookups of the SELinux maps against the IPA "
@@ -323,7 +319,6 @@ class SSSDOptions(object):
         'ad_update_samba_machine_account_password': _('Whether to update the machine account password in the Samba '
                                                       'database'),
         'ad_use_ldaps': _('Use LDAPS port for LDAP and Global Catalog requests'),
-        'ad_allow_remote_domain_local_groups': _('Do not filter domain local groups from other domains'),
 
         # [provider/krb5]
         'krb5_kdcip': _('Kerberos server address'),
@@ -359,6 +354,7 @@ class SSSDOptions(object):
         'ldap_uri': _('ldap_uri, The URI of the LDAP server'),
         'ldap_backup_uri': _('ldap_backup_uri, The URI of the LDAP server'),
         'ldap_search_base': _('The default base DN'),
+        'ldap_read_rootdse': _('How to read rootDSE from LDAP server'),
         'ldap_schema': _('The Schema Type in use on the LDAP server, rfc2307'),
         'ldap_pwmodify_mode': _('Mode used to change user password'),
         'ldap_default_bind_dn': _('The default bind DN'),

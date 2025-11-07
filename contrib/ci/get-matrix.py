@@ -38,11 +38,7 @@ def get_fedora_matrix():
 
 
 def get_centos_matrix():
-    return ['centos-9', 'centos-10']
-
-
-def get_other_matrix():
-    return ['debian-latest']
+    return ['centos-10']
 
 
 if __name__ == "__main__":
@@ -52,10 +48,9 @@ if __name__ == "__main__":
 
     fedora = sorted(get_fedora_matrix())
     centos = sorted(get_centos_matrix())
-    other = sorted(get_other_matrix())
 
     matrix = {
-        'intgcheck': [*fedora, *centos, *other],
+        'intgcheck': [*fedora, *centos],
         'multihost': [*fedora, *centos],
     }
 

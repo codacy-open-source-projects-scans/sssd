@@ -561,6 +561,7 @@ class SSSDConfigTestSSSDDomain(unittest.TestCase):
             'dyndns_update_per_family',
             'dyndns_ttl',
             'dyndns_iface',
+            'dyndns_address',
             'dyndns_refresh_interval',
             'dyndns_refresh_interval_offset',
             'dyndns_update_ptr',
@@ -570,7 +571,6 @@ class SSSDConfigTestSSSDDomain(unittest.TestCase):
             'dyndns_dot_cacert',
             'dyndns_dot_cert',
             'dyndns_dot_key',
-            'subdomain_enumerate',
             'override_gid',
             'case_sensitive',
             'override_homedir',
@@ -926,6 +926,7 @@ class SSSDConfigTestSSSDDomain(unittest.TestCase):
             'dyndns_update_per_family',
             'dyndns_ttl',
             'dyndns_iface',
+            'dyndns_address',
             'dyndns_refresh_interval',
             'dyndns_update_ptr',
             'dyndns_force_tcp',
@@ -934,7 +935,6 @@ class SSSDConfigTestSSSDDomain(unittest.TestCase):
             'dyndns_dot_cacert',
             'dyndns_dot_cert',
             'dyndns_dot_key',
-            'subdomain_enumerate',
             'override_gid',
             'case_sensitive',
             'override_homedir',
@@ -2005,14 +2005,19 @@ class SSSDConfigTestSSSDConfig(unittest.TestCase):
         with open(srcdir + "/testconfigs/sssd-test-parse.conf", "r") as f:
             data = sssdconfig.parse(f)
 
-        self.assertEqual(len(data), 4)
-        self.assertEqual(data[-1], {'type': "section",
+        self.assertEqual(len(data), 5)
+        self.assertEqual(data[-2], {'type': "section",
                                     'name': "nss",
                                     'value': [{'type': 'option',
                                                'name': 'debug_level',
                                                'value': '1'},
                                               {'type': 'empty',
                                                'name': 'empty'}]})
+        self.assertEqual(data[-1], {'type': "section",
+                                    'name': "pam",
+                                    'value': [{'type': 'empty',
+                                               'name': 'empty'}]})
+
 
         with open(srcdir + "/testconfigs/sssd-valid.conf", "r") as f:
             data = sssdconfig.parse(f)

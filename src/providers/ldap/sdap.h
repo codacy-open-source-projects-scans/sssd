@@ -140,6 +140,7 @@ enum sdap_basic_opt {
     SDAP_URI = 0,
     SDAP_BACKUP_URI,
     SDAP_SEARCH_BASE,
+    SDAP_READ_ROOTDSE,
     SDAP_DEFAULT_BIND_DN,
     SDAP_DEFAULT_AUTHTOK_TYPE,
     SDAP_DEFAULT_AUTHTOK,
@@ -562,7 +563,6 @@ struct sdap_options {
     bool support_matching_rule;
     enum dc_functional_level dc_functional_level;
     const char *schema_basedn;
-    bool allow_remote_domain_local_groups;
 
     /* Certificate mapping support */
     struct sdap_certmap_ctx *sdap_certmap_ctx;

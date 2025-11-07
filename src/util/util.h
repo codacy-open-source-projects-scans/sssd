@@ -33,7 +33,14 @@
 #include <netinet/in.h>
 #include <limits.h>
 #include <sys/un.h>
+#ifdef HAVE_SYS_CAPABILITY_H
 #include <sys/capability.h>
+#else
+typedef int cap_value_t;
+#define CAP_DAC_READ_SEARCH 0
+#define CAP_SETGID 0
+#define CAP_SETUID 0
+#endif
 #include <sys/param.h> /* for MIN()/MAX() */
 
 #include <talloc.h>
@@ -80,6 +87,11 @@
 #define NULL 0
 #endif
 
+/* We call it MAXHOSTNAMELEN on FreeBSD */
+#if !defined(HOST_NAME_MAX) && defined(MAXHOSTNAMELEN)
+#define HOST_NAME_MAX MAXHOSTNAMELEN
+#endif
+
 #ifndef ALLPERMS
 #define ALLPERMS (S_ISUID|S_ISGID|S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO)/* 07777 */
 #endif
@@ -113,18 +125,11 @@ enum sssd_exit_status {
     SSS_WATCHDOG_EXIT_CODE = 70 /* to match EX_SOFTWARE in sysexits.h */
 };
 
-#define PIPE_INIT { -1, -1 }
-
-#define PIPE_FD_CLOSE(fd) do {      \
+#define FD_CLOSE(fd) do {           \
     if (fd != -1) {                 \
         close(fd);                  \
         fd = -1;                    \
     }                               \
-} while(0);
-
-#define PIPE_CLOSE(p) do {          \
-    PIPE_FD_CLOSE(p[0]);            \
-    PIPE_FD_CLOSE(p[1]);            \
 } while(0);
 
 #ifndef talloc_zfree
@@ -318,6 +323,22 @@ errno_t sss_parse_internal_fqname(TALLOC_CTX *mem_ctx,
                                   const char *fqname,
                                   char **_shortname,
                                   char **_dom_name);
+
+/* Accepts fqname in the format shortname@domname only
+ * and returns a pointer to domain part or NULL if not found.
+ */
+__attribute__((always_inline))
+static inline const char *sss_get_domain_internal_fqname(const char *fqname)
+{
+    const char *separator = strrchr(fqname, '@');
+
+    if (separator == NULL || *(separator + 1) == '\0' || separator == fqname) {
+        /*The name does not contain name or domain component. */
+        return NULL;
+    }
+
+    return (separator + 1);
+}
 
 /* Creates internal fqname in format shortname@domname.
  * The domain portion is lowercased. */
@@ -596,9 +617,6 @@ struct sss_domain_info *find_domain_by_sid(struct sss_domain_info *domain,
 enum sss_domain_state sss_domain_get_state(struct sss_domain_info *dom);
 void sss_domain_set_state(struct sss_domain_info *dom,
                           enum sss_domain_state state);
-#ifdef BUILD_FILES_PROVIDER
-bool sss_domain_fallback_to_nss(struct sss_domain_info *dom);
-#endif
 bool sss_domain_is_forest_root(struct sss_domain_info *dom);
 const char *sss_domain_type_str(struct sss_domain_info *dom);
 
@@ -614,9 +632,6 @@ struct sss_domain_info *
 find_domain_by_object_name_ex(struct sss_domain_info *domain,
                               const char *object_name, bool strict,
                               uint32_t gnd_flags);
-
-bool subdomain_enumerates(struct sss_domain_info *parent,
-                          const char *sd_name);
 
 char *subdomain_create_conf_path_from_str(TALLOC_CTX *mem_ctx,
                                           const char *parent_name,
@@ -676,20 +691,6 @@ static inline bool is_domain_provider(struct sss_domain_info *domain,
            strcasecmp(domain->provider, provider) == 0;
 }
 
-/* Returns true if the provider used for the passed domain is the "files"
- * one. Otherwise returns false. */
-__attribute__((always_inline))
-static inline bool is_files_provider(struct sss_domain_info *domain)
-{
-#ifdef BUILD_FILES_PROVIDER
-    return domain != NULL &&
-           domain->provider != NULL &&
-           strcasecmp(domain->provider, "files") == 0;
-#else
-    return false;
-#endif
-}
-
 /* from util_lock.c */
 errno_t sss_br_lock_file(int fd, size_t start, size_t len,
                          int num_tries, useconds_t wait);
@@ -713,12 +714,10 @@ char *sss_replace_char(TALLOC_CTX *mem_ctx,
                        const char match,
                        const char sub);
 
-char * sss_replace_space(TALLOC_CTX *mem_ctx,
-                         const char *orig_name,
-                         const char replace_char);
-char * sss_reverse_replace_space(TALLOC_CTX *mem_ctx,
-                                 const char *orig_name,
-                                 const char replace_char);
+void sss_replace_space_inplace(char *orig_name,
+                               const char replace_char);
+void sss_reverse_replace_space_inplace(char *orig_name,
+                                       const char replace_char);
 
 #define GUID_BIN_LENGTH 16
 /* 16 2-digit hex values + 4 dashes + terminating 0 */
@@ -728,6 +727,7 @@ errno_t guid_blob_to_string_buf(const uint8_t *blob, char *str_buf,
                                 size_t buf_size);
 
 const char *get_last_x_chars(const char *str, size_t x);
+errno_t string_ends_with(const char *str, const char *suffix, bool *_result);
 
 char **concatenate_string_array(TALLOC_CTX *mem_ctx,
                                 char **arr1, size_t len1,

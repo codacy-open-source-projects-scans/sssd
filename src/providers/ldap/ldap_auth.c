@@ -37,7 +37,21 @@
 #include <sys/time.h>
 #include <strings.h>
 
+#ifdef HAVE_SHADOW_H
 #include <shadow.h>
+#else
+struct spwd {
+    char          *sp_namp;
+    char          *sp_pwdp;
+    long int       sp_lstchg;
+    long int       sp_min;
+    long int       sp_max;
+    long int       sp_warn;
+    long int       sp_inact;
+    long int       sp_expire;
+    unsigned long int   sp_flag;
+};
+#endif
 #include <security/pam_modules.h>
 
 #include "util/util.h"
@@ -688,7 +702,8 @@ static struct tevent_req *auth_send(TALLOC_CTX *memctx,
     if (!req) return NULL;
 
     /* The token must be a password token */
-    if (sss_authtok_get_type(authtok) != SSS_AUTHTOK_TYPE_PASSWORD) {
+    if (sss_authtok_get_type(authtok) != SSS_AUTHTOK_TYPE_PASSWORD &&
+        sss_authtok_get_type(authtok) != SSS_AUTHTOK_TYPE_PAM_STACKED) {
         if (sss_authtok_get_type(authtok) == SSS_AUTHTOK_TYPE_SC_PIN
             || sss_authtok_get_type(authtok) == SSS_AUTHTOK_TYPE_SC_KEYPAD) {
             /* Tell frontend that we do not support Smartcard authentication */

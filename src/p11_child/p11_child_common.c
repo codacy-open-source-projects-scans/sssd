@@ -27,10 +27,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <popt.h>
-#include <sys/prctl.h>
 
 #include "util/util.h"
-#include "util/child_common.h"
+#include "util/sss_prctl.h"
 #include "providers/backend.h"
 #include "util/crypto/sss_crypto.h"
 #include "util/cert.h"
@@ -63,12 +62,12 @@ static int do_work(TALLOC_CTX *mem_ctx, enum op_mode mode, const char *ca_db,
                    const char *cert_b64, const char *pin,
                    const char *module_name, const char *token_name,
                    const char *key_id, const char *label, const char *uri,
-                   char **multi)
+                   time_t timeout, char **multi)
 {
     int ret;
     struct p11_ctx *p11_ctx;
 
-    ret = init_p11_ctx(mem_ctx, ca_db, wait_for_card, &p11_ctx);
+    ret = init_p11_ctx(mem_ctx, ca_db, wait_for_card, timeout, &p11_ctx);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE, "init_p11_ctx failed.\n");
         return ret;
@@ -105,6 +104,7 @@ done:
 
 static errno_t p11c_recv_data(TALLOC_CTX *mem_ctx, int fd, char **pin)
 {
+    static const size_t IN_BUF_SIZE = 2048;
     uint8_t buf[IN_BUF_SIZE];
     ssize_t len;
     errno_t ret;
@@ -166,6 +166,7 @@ int main(int argc, const char *argv[])
     char *label = NULL;
     char *cert_b64 = NULL;
     long chain_id = 0;
+    long timeout = -1;
     bool wait_for_card = false;
     char *uri = NULL;
 
@@ -204,6 +205,8 @@ int main(int argc, const char *argv[])
          _("PKCS#11 URI to restrict selection"), NULL},
         {"chain-id", 0, POPT_ARG_LONG, &chain_id,
          0, _("Tevent chain ID used for logging purposes"), NULL},
+        {"timeout", 0, POPT_ARG_LONG, &timeout,
+         0, _("OCSP communication timeout"), NULL},
         POPT_TABLEEND
     };
 
@@ -308,7 +311,7 @@ int main(int argc, const char *argv[])
 
     poptFreeContext(pc);
 
-    prctl(PR_SET_DUMPABLE, (dumpable == 0) ? 0 : 1);
+    sss_prctl_set_dumpable((dumpable == 0) ? 0 : 1);
 
     debug_prg_name = talloc_asprintf(NULL, "p11_child[%d]", getpid());
     if (debug_prg_name == NULL) {
@@ -385,9 +388,19 @@ int main(int argc, const char *argv[])
         }
     }
 
+    /* sanity check for timeout value */
+    if (timeout > INT32_MAX) {
+        fprintf(stderr,
+                "Timeout value [%li] is too long, using [%d]\n",
+                timeout, INT32_MAX);
+        timeout = INT32_MAX;
+    } else if (timeout < -1) {
+        timeout = -1;
+    }
+
     ret = do_work(main_ctx, mode, ca_db, cert_verify_opts, wait_for_card,
                   cert_b64, pin, module_name, token_name, key_id, label, uri,
-                  &multi);
+                  timeout, &multi);
 
 done:
     fprintf(stdout, "%d\n%s", ret, multi ? multi : "");

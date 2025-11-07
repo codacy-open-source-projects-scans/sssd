@@ -72,31 +72,6 @@ struct sss_domain_info *get_next_domain(struct sss_domain_info *domain,
     return dom;
 }
 
-bool subdomain_enumerates(struct sss_domain_info *parent,
-                          const char *sd_name)
-{
-    if (parent->sd_enumerate == NULL
-            || parent->sd_enumerate[0] == NULL) {
-        DEBUG(SSSDBG_MINOR_FAILURE,
-              "Subdomain_enumerate not set\n");
-        return false;
-    }
-
-    if (strcasecmp(parent->sd_enumerate[0], "all") == 0) {
-        return true;
-    } else if (strcasecmp(parent->sd_enumerate[0], "none") == 0) {
-        return false;
-    } else {
-        for (int i=0; parent->sd_enumerate[i]; i++) {
-            if (strcasecmp(parent->sd_enumerate[i], sd_name) == 0) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
 struct sss_domain_info *find_domain_by_name_ex(struct sss_domain_info *domain,
                                                 const char *name,
                                                 bool match_any,
@@ -747,6 +722,7 @@ done:
 #define LOCALAUTH_PLUGIN_CONFIG \
 "[plugins]\n" \
 " localauth = {\n" \
+"  disable = an2ln\n" \
 "  module = sssd:"APP_MODULES_PATH"/sssd_krb5_localauth_plugin.so\n" \
 " }\n"
 
@@ -904,18 +880,14 @@ static const char *domain_state_str(struct sss_domain_info *dom)
         return "Disabled";
     case DOM_INACTIVE:
         return "Inactive";
-#ifdef BUILD_FILES_PROVIDER
-    case DOM_INCONSISTENT:
-        return "Inconsistent";
-#endif /* BUILD_FILES_PROVIDER */
     }
     return "Unknown";
 }
 
 enum sss_domain_state sss_domain_get_state(struct sss_domain_info *dom)
 {
-    DEBUG(SSSDBG_TRACE_LIBS,
-          "Domain %s is %s\n", dom->name, domain_state_str(dom));
+    DEBUG_CONDITIONAL(SSSDBG_TRACE_INTERNAL,
+                      "Domain %s is %s\n", dom->name, domain_state_str(dom));
     return dom->state;
 }
 
@@ -926,13 +898,6 @@ void sss_domain_set_state(struct sss_domain_info *dom,
     DEBUG(SSSDBG_TRACE_LIBS,
           "Domain %s is %s\n", dom->name, domain_state_str(dom));
 }
-
-#ifdef BUILD_FILES_PROVIDER
-bool sss_domain_fallback_to_nss(struct sss_domain_info *dom)
-{
-    return dom->fallback_to_nss;
-}
-#endif
 
 bool sss_domain_is_forest_root(struct sss_domain_info *dom)
 {

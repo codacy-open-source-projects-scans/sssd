@@ -144,7 +144,7 @@ AC_DEFUN([WITH_INITSCRIPT],
 AC_DEFUN([WITH_SYSLOG],
   [ AC_ARG_WITH([syslog],
                 [AC_HELP_STRING([--with-syslog=SYSLOG_TYPE],
-                                [Type of your system logger (syslog|journald). [syslog]]
+                                [Type of your system logger (syslog|journald|stderr). [syslog]]
                                )
                 ],
                 [],
@@ -152,13 +152,18 @@ AC_DEFUN([WITH_SYSLOG],
                )
 
   if test x"$with_syslog" = xsyslog || \
-     test x"$with_syslog" = xjournald; then
+     test x"$with_syslog" = xjournald || \
+     test x"$with_syslog" = xstderr; then
         syslog=$with_syslog
   else
-      AC_MSG_ERROR([Unknown syslog type, supported types are syslog and journald])
+      AC_MSG_ERROR([Unknown syslog type, supported types are syslog, journald and stderr])
   fi
 
   AM_CONDITIONAL([WITH_JOURNALD], [test x"$syslog" = xjournald])
+  AM_CONDITIONAL([WITH_STDERR_SYSLOG], [test x"$syslog" = xstderr])
+  if test x"$with_syslog" = xstderr; then
+      AC_DEFINE_UNQUOTED([WITH_STDERR_SYSLOG], 1, [Send syslog to stderr])
+  fi
   ])
 
 AC_DEFUN([WITH_ENVIRONMENT_FILE],
@@ -462,17 +467,32 @@ AC_DEFUN([WITH_IPA_GETKEYTAB],
     AC_DEFINE_UNQUOTED(IPA_GETKEYTAB_PATH, "$IPA_GETKEYTAB_PATH", [The path to the ipa-getkeytab utility])
   ])
 
-AC_DEFUN([WITH_NSCD_CONF],
-  [ AC_ARG_WITH([nscd_conf],
-                [AC_HELP_STRING([--with-nscd-conf=PATH], [Path to nscd.conf file [/etc/nscd.conf]])
+AC_DEFUN([WITH_ADCLI_PATH],
+  [ AC_ARG_WITH([adcli_path],
+                [AC_HELP_STRING([--with-adcli-path=PATH],
+                                [Path to adcli binary for keytab renewal [/usr/sbin/adcli]]
+                               )
                 ]
                )
-
-    NSCD_CONF_PATH="/etc/nscd.conf"
-    if test x"$with_nscd_conf" != x; then
-        NSCD_CONF_PATH=$with_nscd_conf
+    ADCLI_PATH="/usr/sbin/adcli"
+    if test x"$with_adcli_path" != x; then
+        ADCLI_PATH=$with_adcli_path
     fi
-    AC_DEFINE_UNQUOTED([NSCD_CONF_PATH], ["$NSCD_CONF_PATH"], [NSCD configuration file])
+    AC_DEFINE_UNQUOTED(RENEWAL_PROG_PATH_ADCLI, "$ADCLI_PATH", [The path to the adcli utility])
+  ])
+
+AC_DEFUN([WITH_REALM_PATH],
+  [ AC_ARG_WITH([realm_path],
+                [AC_HELP_STRING([--with-realm-path=PATH],
+                                [Path to realm binary for keytab renewal [/usr/sbin/realm]]
+                               )
+                ]
+               )
+    REALM_PATH="/usr/sbin/realm"
+    if test x"$with_realm_path" != x; then
+        REALM_PATH=$with_realm_path
+    fi
+    AC_DEFINE_UNQUOTED(RENEWAL_PROG_PATH_REALM, "$REALM_PATH", [The path to the realm utility])
   ])
 
 AC_DEFUN([WITH_GPO_CACHE_PATH],
@@ -626,58 +646,6 @@ AC_DEFUN([WITH_AUTOFS],
     AM_CONDITIONAL([BUILD_AUTOFS], [test x"$with_autofs" = xyes])
   ])
 
-AC_DEFUN([WITH_FILES_PROVIDER],
-  [ AC_ARG_WITH([files-provider],
-                [AC_HELP_STRING([--with-files-provider],
-                                [Whether to build with files provider support [no].
-                                 Please take a note that "files provider" is deprecated
-                                 and might be removed in further releases.]
-                               )
-                ],
-                [with_files_provider=$withval],
-                with_files_provider=no
-               )
-
-    if test x"$with_files_provider" = xyes; then
-        AC_DEFINE(BUILD_FILES_PROVIDER, 1, [whether to build with files provider support])
-    fi
-    AM_CONDITIONAL([BUILD_FILES_PROVIDER], [test x"$with_files_provider" = xyes])
-  ])
-
-AC_DEFUN([WITH_EXTENDED_ENUMERATION_SUPPORT],
-  [ AC_ARG_WITH([extended-enumeration-support],
-                [AC_HELP_STRING([--with-extended-enumeration-support],
-                                [Whether to build enumeration support for
-                                 IPA and AD providers [no].]
-                               )
-                ],
-                [with_extended_enumeration_support=$withval],
-                with_extended_enumeration_support=no
-               )
-
-    if test x"$with_extended_enumeration_support" = xyes; then
-        AC_DEFINE(BUILD_EXTENDED_ENUMERATION_SUPPORT, 1, [Whether to build extended enumeration support])
-    fi
-    AM_CONDITIONAL([BUILD_EXTENDED_ENUMERATION_SUPPORT], [test x"$with_extended_enumeration_support" = xyes])
-  ])
-
-AC_DEFUN([WITH_ALLOW_REMOTE_DOMAIN_LOCAL_GROUPS],
-  [ AC_ARG_WITH([allow-remote-domain-local-groups],
-                [AC_HELP_STRING([--with-allow-remote-domain-local-groups],
-                                [Whether to build support of deprecated ad_allow_remote_domain_local_groups
-                                 sssd.conf option [no].]
-                               )
-                ],
-                [with_allow_remote_domain_local_groups=$withval],
-                with_allow_remote_domain_local_groups=no
-               )
-
-    if test x"$with_allow_remote_domain_local_groups" = xyes; then
-        AC_DEFINE(BUILD_ALLOW_REMOTE_DOMAIN_LOCAL_GROUPS, 1, [Whether to build support of deprecated ad_allow_remote_domain_local_groups sssd.conf option])
-    fi
-    AM_CONDITIONAL([BUILD_ALLOW_REMOTE_DOMAIN_LOCAL_GROUPS], [test x"$with_allow_remote_domain_local_groups" = xyes])
-  ])
-
 AC_DEFUN([WITH_SUBID],
   [ AC_ARG_WITH([subid],
                 [AC_HELP_STRING([--with-subid],
@@ -733,40 +701,6 @@ AC_DEFUN([WITH_SSH],
         AC_DEFINE(BUILD_SSH, 1, [whether to build with SSH support])
     fi
     AM_CONDITIONAL([BUILD_SSH], [test x"$with_ssh" = xyes])
-  ])
-
-AC_DEFUN([WITH_SSH_KNOWN_HOSTS_PROXY],
-  [ AC_ARG_WITH([ssh-known-hosts-proxy],
-                [AC_HELP_STRING([--with-ssh-known-hosts-proxy],
-                                [Whether to build the sss_ssh_knownhostsproxy tool [no]]
-                               )
-                ],
-                [with_ssh_know_hosts_proxy=$withval],
-                with_ssh_know_hosts_proxy=no
-               )
-
-    if test x"$with_ssh" = xyes -a x"$with_ssh_know_hosts_proxy" = xyes; then
-        AC_DEFINE(BUILD_SSH_KNOWN_HOSTS_PROXY, 1, [whether to build the sss_ssh_knownhostsproxy tool])
-    fi
-    AM_CONDITIONAL([BUILD_SSH_KNOWN_HOSTS_PROXY], [test x"$with_ssh" = xyes -a x"$with_ssh_know_hosts_proxy" = xyes])
-  ])
-
-AC_DEFUN([WITH_LIBSIFP],
-  [ AC_ARG_WITH([libsifp],
-                [AC_HELP_STRING([--with-libsifp],
-                                [Whether to build sss_simpleifp library [no].
-                                Please take a note that sss_simpleifp library is
-                                deprecated and might be removed in further releases.]
-                               )
-                ],
-                [with_libsifp=$withval],
-                with_libsifp=no
-               )
-
-    if test x"$with_libsifp" = xyes; then
-        AC_DEFINE(BUILD_LIBSIFP, 1, [whether to build sss_simpleifp library])
-    fi
-    AM_CONDITIONAL([BUILD_LIBSIFP], [test x"$with_libsifp" = xyes])
   ])
 
 AC_DEFUN([WITH_SAMBA],
@@ -849,25 +783,6 @@ AC_DEFUN([WITH_SSSD_USER],
     if test x"$SSSD_USER" != xroot; then
         AC_DEFINE(SSSD_NON_ROOT_USER, 1, [whether support of non root user configured])
     fi
-  ])
-
-AC_DEFUN([WITH_CONF_SERVICE_USER_SUPPORT],
-  [ AC_ARG_WITH([conf-service-user-support],
-                [AC_HELP_STRING([--with-conf-service-user-support],
-                                [Whether to build support for sssd.conf::user option [no].
-                                 Requires "--with-sssd-user=..." to be used.
-                                 Please take a note that this feature is deprecated and
-                                 might be removed in further releases.]
-                               )
-                ],
-                [with_conf_service_user_support=$withval],
-                with_conf_service_user_support=no
-               )
-
-    if test x"$with_conf_service_user_support" = xyes; then
-        AC_DEFINE(BUILD_CONF_SERVICE_USER_SUPPORT, 1, [Whether to build support for sssd.conf::user option])
-    fi
-    AM_CONDITIONAL([BUILD_CONF_SERVICE_USER_SUPPORT], [test x"$with_conf_service_user_support" = xyes])
   ])
 
   AC_DEFUN([WITH_AD_GPO_DEFAULT],
@@ -969,6 +884,22 @@ AC_DEFUN([WITH_OIDC_CHILD],
     AM_CONDITIONAL([BUILD_OIDC_CHILD], [test x"$with_oidc_child" = xyes])
   ])
 
+AC_DEFUN([WITH_ID_PROVIDER_IDP],
+  [ AC_ARG_WITH([id-provider-idp],
+                [AC_HELP_STRING([--with-id-provider-idp],
+                                [Whether to build with the IdP id provider [yes]]
+                               )
+                ],
+                [with_id_provider_idp=$withval],
+                with_id_provider_idp=yes
+               )
+
+    if test x"$with_id_provider_idp" = xyes; then
+        AC_DEFINE(BUILD_ID_PROVIDER_IDP, 1, [whether to build with IdP id provider])
+    fi
+    AM_CONDITIONAL([BUILD_ID_PROVIDER_IDP], [test x"$with_id_provider_idp" = xyes])
+  ])
+
 AC_DEFUN([WITH_TMPFILES_DIR],
   [ AC_ARG_WITH([tmpfilesdir],
                 [AS_HELP_STRING([--with-tmpfilesdir],
@@ -1003,6 +934,19 @@ AC_DEFUN([WITH_SYSTEMD_SYSUSERS_DIR],
          [AC_DEFINE([BUILD_SYSTEMD_SYSUSERS], 1, [whether to install the systemd-sysusers configuration])])
     AM_CONDITIONAL([BUILD_SYSTEMD_SYSUSERS], [test x"$with_systemd_sysusersdir" != xno])
     AC_SUBST([systemd_sysusersdir])
+  ])
+
+AC_DEFUN([WITH_LDB_MODULES_PATH],
+  [ AC_ARG_WITH([ldb-modules-path],
+                [AS_HELP_STRING([--with-ldb-modules-path=PATH],
+                                [Override runtime LDB modules path])],
+                [ldb_modules_path_override=$withval],
+                [ldb_modules_path_override=no])
+
+    if test x"$ldb_modules_path_override" != x"no"; then
+        AC_DEFINE_UNQUOTED([LDB_MODULES_PATH_OVERRIDE], ["$ldb_modules_path_override"],
+                            [Override for LDB_MODULES_PATH environment variable])
+    fi
   ])
 
 AC_ARG_ENABLE([gss-spnego-for-zero-maxssf],

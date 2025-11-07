@@ -26,17 +26,16 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <ctype.h>
 #include <popt.h>
-#include <sys/prctl.h>
 
 #include <security/pam_modules.h>
 
 #include "util/util.h"
 #include "util/sss_krb5.h"
 #include "util/user_info_msg.h"
-#include "util/child_common.h"
 #include "util/find_uid.h"
 #include "util/sss_chain_id.h"
 #include "util/sss_ptr_hash.h"
@@ -141,7 +140,6 @@ static krb5_error_code get_tgt_times(krb5_context ctx, const char *ccname,
                                      sss_krb5_ticket_times *tgtt);
 
 static errno_t k5c_attach_otp_info_msg(struct krb5_req *kr);
-static errno_t k5c_attach_oauth2_info_msg(struct krb5_req *kr, struct sss_idp_oauth2 *data);
 #ifdef BUILD_PASSKEY
 static errno_t k5c_attach_passkey_msg(struct krb5_req *kr, struct sss_passkey_challenge *data);
 #endif /* BUILD_PASSKEY */
@@ -530,10 +528,11 @@ static krb5_error_code tokeninfo_matches(TALLOC_CTX *mem_ctx,
     size_t fa2_len;
 
     switch (sss_authtok_get_type(auth_tok)) {
+    case SSS_AUTHTOK_TYPE_PAM_STACKED:
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
         ret = sss_authtok_get_2fa_single(auth_tok, &pwd, &len);
         if (ret != EOK) {
-            DEBUG(SSSDBG_OP_FAILURE, "sss_authtok_get_password failed.\n");
+            DEBUG(SSSDBG_OP_FAILURE, "sss_authtok_get_2fa_single failed.\n");
             return ret;
         }
 
@@ -829,7 +828,7 @@ static krb5_error_code idp_oauth2_preauth(struct krb5_req *kr,
      * with this exact child process in order to maintain internal Kerberos
      * state so we are able to respond to this particular challenge. */
 
-    ret = k5c_attach_oauth2_info_msg(kr, oauth2);
+    ret = attach_oauth2_info_msg(kr->pd, oauth2);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE, "k5c_attach_oauth2_info_msg failed.\n");
         return ret;
@@ -1205,8 +1204,10 @@ static krb5_error_code answer_password(krb5_context kctx,
     if ((kr->pd->cmd == SSS_PAM_AUTHENTICATE
                 || kr->pd->cmd == SSS_PAM_CHAUTHTOK_PRELIM
                 || kr->pd->cmd == SSS_PAM_CHAUTHTOK)
-            && sss_authtok_get_type(kr->pd->authtok)
-                                     == SSS_AUTHTOK_TYPE_PASSWORD) {
+            && (sss_authtok_get_type(kr->pd->authtok)
+                                     == SSS_AUTHTOK_TYPE_PASSWORD
+                || sss_authtok_get_type(kr->pd->authtok)
+                                     == SSS_AUTHTOK_TYPE_PAM_STACKED)) {
         ret = sss_authtok_get_password(kr->pd->authtok, &pwd, NULL);
         if (ret != EOK) {
             DEBUG(SSSDBG_OP_FAILURE,
@@ -1674,62 +1675,6 @@ static errno_t k5c_attach_otp_info_msg(struct krb5_req *kr)
     return ret;
 }
 
-static errno_t k5c_attach_oauth2_info_msg(struct krb5_req *kr,
-                                          struct sss_idp_oauth2 *data)
-{
-    uint8_t *msg;
-    const char *curi;
-    size_t msg_len;
-    size_t uri_len = 0;
-    size_t curi_len = 0;
-    size_t user_code_len = 0;
-    size_t idx = 0;
-    errno_t ret;
-
-    if (data->verification_uri == NULL || data->user_code == NULL) {
-        DEBUG(SSSDBG_CRIT_FAILURE,
-              "Empty oauth2 verification_uri or user_code\n");
-        return EINVAL;
-    }
-
-    msg_len = 0;
-
-    uri_len = strlen(data->verification_uri) + 1;
-    msg_len += uri_len;
-
-    if (data->verification_uri_complete != NULL) {
-        curi = data->verification_uri_complete;
-        curi_len = strlen(curi) + 1;
-    } else {
-        curi = "";
-        curi_len = 1;
-    }
-    msg_len += curi_len;
-
-    user_code_len = strlen(data->user_code) + 1;
-    msg_len += user_code_len;
-
-    msg = talloc_zero_size(NULL, msg_len);
-    if (msg == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "talloc_size failed.\n");
-        return ENOMEM;
-    }
-
-    memcpy(msg, data->verification_uri, uri_len);
-    idx += uri_len;
-
-    memcpy(msg + idx, curi, curi_len);
-    idx += curi_len;
-
-    memcpy(msg + idx, data->user_code, user_code_len);
-
-    ret = pam_add_response(kr->pd, SSS_PAM_OAUTH2_INFO, msg_len, msg);
-    talloc_zfree(msg);
-
-    return ret;
-}
-
-
 static errno_t k5c_attach_keep_alive_msg(struct krb5_req *kr)
 {
     uint8_t *msg;
@@ -1837,6 +1782,23 @@ static errno_t get_pkinit_identity(TALLOC_CTX *mem_ctx,
 
     if (module_name == NULL || *module_name == '\0') {
         module_name = "p11-kit-proxy.so";
+    }
+
+    /* The ':' character is used as a seperator and libkrb5 currently does not
+     * allow to escape it in names. So we have to error out if any of the
+     * names contains a ':' */
+    if ((token_name != NULL && strchr(token_name, ':') != NULL)
+            || strchr(module_name, ':') != NULL
+            || (key_id != NULL && strchr(key_id, ':') != NULL)
+            || (label != NULL && strchr(label, ':') != NULL)) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Some of the certificate identification data ([%s][%s][%s][%s]) "
+              "contain a ':' character\n",
+              token_name != NULL ? token_name : "- not set -",
+              module_name,
+              key_id != NULL ? key_id : "- not set -",
+              label != NULL ? label : "-not set -");
+        return ERR_INVALID_CONFIG;
     }
 
     identity = talloc_asprintf(mem_ctx, "PKCS11:module_name=%s", module_name);
@@ -2316,17 +2278,25 @@ static krb5_error_code get_and_save_tgt(struct krb5_req *kr,
 
         ret = get_pkinit_identity(kr, kr->pd->authtok, &identity);
         if (ret != EOK) {
-            DEBUG(SSSDBG_OP_FAILURE, "get_pkinit_identity failed.\n");
-            return ret;
-        }
-
-        kerr = krb5_get_init_creds_opt_set_pa(kr->ctx, kr->options,
-                                              "X509_user_identity", identity);
-        talloc_free(identity);
-        if (kerr != 0) {
-            DEBUG(SSSDBG_CRIT_FAILURE,
-                  "krb5_get_init_creds_opt_set_pa failed.\n");
-            return kerr;
+            /* Skip Smartcard credentials during SSSD pre-auth if they contain
+             * invalid characters and figure out if other authentication
+             * methods are available. */
+            if (ret == ERR_INVALID_CONFIG && kr->pd->cmd == SSS_PAM_PREAUTH) {
+                DEBUG(SSSDBG_OP_FAILURE,
+                      "Smartcard credentials are ignored.\n");
+            } else {
+                DEBUG(SSSDBG_OP_FAILURE, "get_pkinit_identity failed.\n");
+                return ret;
+            }
+        } else {
+            kerr = krb5_get_init_creds_opt_set_pa(kr->ctx, kr->options,
+                                                  "X509_user_identity", identity);
+            talloc_free(identity);
+            if (kerr != 0) {
+                DEBUG(SSSDBG_CRIT_FAILURE,
+                      "krb5_get_init_creds_opt_set_pa failed.\n");
+                return kerr;
+            }
         }
 
         /* TODO: Maybe X509_anchors should be added here as well */
@@ -2350,6 +2320,10 @@ static krb5_error_code get_and_save_tgt(struct krb5_req *kr,
     } else {
         if (kerr != 0) {
             KRB5_CHILD_DEBUG(SSSDBG_CRIT_FAILURE, kerr);
+
+            if (kerr == EAGAIN) {
+                kerr = KRB5_KDC_UNREACH;
+            }
 
             /* Special case for IPA password migration */
             if (kr->pd->cmd == SSS_PAM_AUTHENTICATE
@@ -2753,6 +2727,7 @@ static errno_t tgt_req_child(struct krb5_req *kr)
 
     /* No password is needed for pre-auth or if we have 2FA or SC */
     if (kr->pd->cmd != SSS_PAM_PREAUTH
+            && sss_authtok_get_type(kr->pd->authtok) != SSS_AUTHTOK_TYPE_PAM_STACKED
             && sss_authtok_get_type(kr->pd->authtok) != SSS_AUTHTOK_TYPE_2FA
             && sss_authtok_get_type(kr->pd->authtok) != SSS_AUTHTOK_TYPE_2FA_SINGLE
             && sss_authtok_get_type(kr->pd->authtok) != SSS_AUTHTOK_TYPE_SC_PIN
@@ -3039,6 +3014,9 @@ static errno_t unpack_authtok(struct sss_auth_token *tok,
         break;
     case SSS_AUTHTOK_TYPE_2FA_SINGLE:
         ret = sss_authtok_set_2fa_single(tok, (char *)(buf + *p), 0);
+        break;
+    case SSS_AUTHTOK_TYPE_PAM_STACKED:
+        ret = sss_authtok_set_pam_stacked(tok, (char *)(buf + *p), 0);
         break;
     case SSS_AUTHTOK_TYPE_2FA:
     case SSS_AUTHTOK_TYPE_SC_PIN:
@@ -3568,6 +3546,7 @@ done:
 
 static errno_t k5c_recv_data(struct krb5_req *kr, int fd, uint32_t *offline)
 {
+    static const size_t IN_BUF_SIZE = 2048;
     uint8_t buf[IN_BUF_SIZE];
     ssize_t len;
     errno_t ret;
@@ -4133,7 +4112,7 @@ int main(int argc, const char *argv[])
          _("Requests canonicalization of the principal name"), NULL},
         {CHILD_OPT_SSS_CREDS_PASSWORD, 0, POPT_ARG_NONE, &sss_creds_password,
          0, _("Use custom version of krb5_get_init_creds_password"), NULL},
-        {CHILD_OPT_CHAIN_ID, 0, POPT_ARG_LONG, &chain_id,
+        {"chain-id", 0, POPT_ARG_LONG, &chain_id,
          0, _("Tevent chain ID used for logging purposes"), NULL},
         {CHILD_OPT_CHECK_PAC, 0, POPT_ARG_LONG, &dummy_long, 0,
          _("Check PAC flags"), NULL},

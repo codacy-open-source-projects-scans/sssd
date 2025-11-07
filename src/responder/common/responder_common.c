@@ -103,32 +103,29 @@ static errno_t get_client_cred(struct cli_ctx *cctx)
     cctx->creds = talloc_zero(cctx, struct cli_creds);
     if (!cctx->creds) return ENOMEM;
 
-    socklen_t client_cred_len = sizeof(struct ucred);
+    socklen_t client_cred_len = sizeof(STRUCT_CRED);
     char proc_path[32];
     char cmd_line[255] = { 0 };
     int proc_fd;
 
-    cctx->creds->ucred.uid = -1;
-    cctx->creds->ucred.gid = -1;
-    cctx->creds->ucred.pid = -1;
-
-    ret = getsockopt(cctx->cfd, SOL_SOCKET, SO_PEERCRED, &cctx->creds->ucred,
+    ret = getsockopt(cctx->cfd, SOL_SOCKET, SSS_PEERCRED_SOCKET_OPTION, &cctx->creds->ucred,
                      &client_cred_len);
     if (ret != EOK) {
+        talloc_zfree(cctx->creds);
         ret = errno;
         DEBUG(SSSDBG_CRIT_FAILURE,
               "getsockopt failed [%d][%s].\n", ret, strerror(ret));
         return ret;
     }
-    if (client_cred_len != sizeof(struct ucred)) {
+    if (client_cred_len != sizeof(STRUCT_CRED)) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "getsockopt returned unexpected message size.\n");
         return ENOMSG;
     }
 
-    if (cctx->creds->ucred.pid > -1) {
+    if (cli_creds_get_pid(cctx->creds) > 0) {
         ret = snprintf(proc_path, sizeof(proc_path), "/proc/%d/cmdline",
-                       (int)cctx->creds->ucred.pid);
+                       (int)cli_creds_get_pid(cctx->creds));
         if ((ret > 0) && (ret < sizeof(proc_path))) {
             proc_fd = open(proc_path, O_RDONLY);
             if (proc_fd != -1) {
@@ -151,8 +148,8 @@ static errno_t get_client_cred(struct cli_ctx *cctx)
     DEBUG(SSSDBG_TRACE_ALL,
           "Client [%p][%d] creds: euid[%d] egid[%d] pid[%d] cmd_line['%s'].\n",
           cctx, cctx->cfd,
-          cctx->creds->ucred.uid, cctx->creds->ucred.gid,
-          cctx->creds->ucred.pid, cmd_line);
+          cli_creds_get_uid(cctx->creds), cli_creds_get_gid(cctx->creds),
+          cli_creds_get_pid(cctx->creds), cmd_line);
 
     ret = SELINUX_getpeercon(cctx->cfd, &secctx);
     if (ret != 0) {
@@ -924,7 +921,6 @@ static errno_t responder_init_ncache(TALLOC_CTX *mem_ctx,
                                      struct sss_nc_ctx **ncache)
 {
     uint32_t neg_timeout;
-    uint32_t locals_timeout;
     int tmp_value;
     int ret;
 
@@ -947,28 +943,8 @@ static errno_t responder_init_ncache(TALLOC_CTX *mem_ctx,
 
     neg_timeout = tmp_value;
 
-    /* local_timeout */
-    ret = confdb_get_int(cdb, CONFDB_NSS_CONF_ENTRY,
-                         CONFDB_RESPONDER_LOCAL_NEG_TIMEOUT,
-                         CONFDB_RESPONDER_LOCAL_NEG_TIMEOUT_DEFAULT,
-                         &tmp_value);
-    if (ret != EOK) {
-        DEBUG(SSSDBG_FATAL_FAILURE,
-              "Fatal failure of setup negative cache timeout [%s].\n",
-              CONFDB_RESPONDER_LOCAL_NEG_TIMEOUT);
-        ret = ENOENT;
-        goto done;
-    }
-
-    if (tmp_value < 0) {
-        ret = EINVAL;
-        goto done;
-    }
-
-    locals_timeout = tmp_value;
-
     /* negative cache init */
-    ret = sss_ncache_init(mem_ctx, neg_timeout, locals_timeout, ncache);
+    ret = sss_ncache_init(mem_ctx, neg_timeout, ncache);
     if (ret != EOK) {
         DEBUG(SSSDBG_FATAL_FAILURE,
               "Fatal failure of initializing negative cache.\n");
@@ -1106,7 +1082,7 @@ int sss_process_init(TALLOC_CTX *mem_ctx,
 
     ret = confdb_get_bool(rctx->cdb, rctx->confdb_service_path,
                           CONFDB_RESPONDER_CACHE_FIRST,
-                          CONFDB_RESPONDER_CACHE_FIRST_DEFAILT,
+                          CONFDB_RESPONDER_CACHE_FIRST_DEFAULT,
                           &rctx->cache_first);
     if (ret != EOK) {
         DEBUG(SSSDBG_OP_FAILURE,
@@ -1678,20 +1654,13 @@ int sized_output_name(TALLOC_CTX *mem_ctx,
                       struct sss_domain_info *name_dom,
                       struct sized_string **_name)
 {
-    TALLOC_CTX *tmp_ctx = NULL;
     errno_t ret;
     char *name_str;
     struct sized_string *name;
 
-    tmp_ctx = talloc_new(NULL);
-    if (tmp_ctx == NULL) {
-        return ENOMEM;
-    }
-
-    name = talloc_zero(tmp_ctx, struct sized_string);
+    name = talloc_zero(mem_ctx, struct sized_string);
     if (name == NULL) {
-        ret = ENOMEM;
-        goto done;
+        return ENOMEM;
     }
 
     ret = sss_output_fqname(name, name_dom, orig_name,
@@ -1701,10 +1670,15 @@ int sized_output_name(TALLOC_CTX *mem_ctx,
     }
 
     to_sized_string(name, name_str);
-    *_name = talloc_steal(mem_ctx, name);
     ret = EOK;
+
 done:
-    talloc_zfree(tmp_ctx);
+    if (ret == EOK) {
+        *_name = name;
+    } else {
+        talloc_free(name);
+    }
+
     return ret;
 }
 
@@ -1713,37 +1687,20 @@ int sized_domain_name(TALLOC_CTX *mem_ctx,
                       const char *member_name,
                       struct sized_string **_name)
 {
-    TALLOC_CTX *tmp_ctx = NULL;
-    errno_t ret;
-    char *domname;
+    const char *domain;
     struct sss_domain_info *member_dom;
 
-    tmp_ctx = talloc_new(NULL);
-    if (tmp_ctx == NULL) {
-        return ENOMEM;
-    }
-
-    ret = sss_parse_internal_fqname(tmp_ctx, member_name, NULL, &domname);
-    if (ret != EOK) {
-        DEBUG(SSSDBG_CRIT_FAILURE, "sss_parse_internal_fqname failed\n");
-        goto done;
-    }
-
-    if (domname == NULL) {
-        ret = ERR_WRONG_NAME_FORMAT;
-        goto done;
+    domain = sss_get_domain_internal_fqname(member_name);
+    if (domain == NULL) {
+        return ERR_WRONG_NAME_FORMAT;
     }
 
     member_dom = find_domain_by_name(get_domains_head(rctx->domains),
-                                     domname, true);
+                                     domain, true);
     if (member_dom == NULL) {
-        ret = ERR_DOMAIN_NOT_FOUND;
-        goto done;
+        return ERR_DOMAIN_NOT_FOUND;
     }
 
-    ret = sized_output_name(mem_ctx, rctx, member_name,
-                            member_dom, _name);
-done:
-    talloc_free(tmp_ctx);
-    return ret;
+    return sized_output_name(mem_ctx, rctx, member_name,
+                             member_dom, _name);
 }

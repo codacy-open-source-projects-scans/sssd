@@ -45,6 +45,7 @@ AM_CONDITIONAL([HAVE_GCC], [test "$ac_cv_prog_gcc" = yes])
 
 AC_CHECK_HEADERS(stdint.h dlfcn.h)
 AC_CHECK_HEADERS([stdatomic.h],,AC_MSG_ERROR([C11 atomic types are not supported]))
+AC_CHECK_HEADERS(shadow.h)
 AC_CONFIG_HEADER(config.h)
 
 AC_CHECK_TYPES([errno_t], [], [], [[#include <errno.h>]])
@@ -117,7 +118,7 @@ AC_CHECK_FUNCS([ explicit_bzero ])
 # Check for the timegm() function (not part of POSIX / Open Group specs)
 AC_CHECK_FUNC([timegm], [], [AC_MSG_ERROR([timegm() function not found])])
 
-#Check for endian headers
+# Check for endian headers
 AC_CHECK_HEADERS([endian.h sys/endian.h byteswap.h])
 
 AC_C_BIGENDIAN([AC_DEFINE(HAVE_BIG_ENDIAN, [1], [whether platform is big endian])],
@@ -172,6 +173,8 @@ WITH_CIFS_PLUGIN_PATH
 WITH_WINBIND_PLUGIN_PATH
 WITH_SELINUX
 WITH_IPA_GETKEYTAB
+WITH_ADCLI_PATH
+WITH_REALM_PATH
 WITH_AD_GPO_DEFAULT
 WITH_GPO_CACHE_PATH
 WITH_NOLOGIN_SHELL
@@ -180,16 +183,10 @@ WITH_APP_LIBS
 WITH_SUDO
 WITH_SUDO_LIB_PATH
 WITH_AUTOFS
-WITH_FILES_PROVIDER
-WITH_EXTENDED_ENUMERATION_SUPPORT
-WITH_ALLOW_REMOTE_DOMAIN_LOCAL_GROUPS
-WITH_CONF_SERVICE_USER_SUPPORT
 WITH_SUBID
 WITH_SUBID_LIB_PATH
 WITH_PASSKEY
 WITH_SSH
-WITH_SSH_KNOWN_HOSTS_PROXY
-WITH_LIBSIFP
 WITH_SYSLOG
 WITH_SAMBA
 WITH_NFS
@@ -199,9 +196,11 @@ SSSD_RUNSTATEDIR
 WITH_SECRETS_DB_PATH
 WITH_KCM
 WITH_OIDC_CHILD
+WITH_ID_PROVIDER_IDP
 WITH_TMPFILES_DIR
 WITH_UDEV_RULES_DIR
 WITH_SYSTEMD_SYSUSERS_DIR
+WITH_LDB_MODULES_PATH
 
 m4_include([src/external/pkg.m4])
 m4_include([src/external/libpopt.m4])
@@ -276,10 +275,6 @@ UNICODE_LIBS=$UNISTRING_LIBS
 AC_SUBST(UNICODE_LIBS)
 
 WITH_LIBNL
-
-AS_IF([test x$HAVE_NSCD], [
-    WITH_NSCD_CONF
-])
 
 WITH_INITSCRIPT
 AS_IF([test x$initscript = xsystemd], [
@@ -521,12 +516,27 @@ AS_IF([test x$have_check = x], [
     AC_CHECK_HEADERS([check.h],,AC_MSG_ERROR([Could not find CHECK headers]))
 ])
 
+AC_ARG_ENABLE([linux-caps], [AS_HELP_STRING([--enable-linux-caps],
+                            [Allow SSSD programs to use libcap to manage own privileges [default=yes]])],
+              [linux_caps=$enableval],
+              [linux_caps=yes])
+
 PKG_CHECK_MODULES([CAP], [libcap], [have_libcap=1], [have_libcap=])
-AS_IF([test x$have_libcap = x], [
-    AC_MSG_ERROR([libcap is missing])
+AS_IF([test x$linux_caps != xno], [
+    AS_IF([test x$have_libcap = x], [
+        AC_MSG_ERROR([libcap is missing. Pass --disable-linux-caps to build without capabilities support])
+    ], [
+        AC_CHECK_HEADERS([sys/capability.h],,AC_MSG_ERROR([Could not find sys/capability.h headers]))
+    ])
 ], [
-    AC_CHECK_HEADERS([sys/capability.h],,AC_MSG_ERROR([Could not find sys/capability.h headers]))
+    AS_IF([test x$initscript = xsystemd], [
+        AC_MSG_ERROR(['--disable-linux-caps' is incompatible with '--with-initscript=systemd'])
+    ], [])
+    AS_IF([test x"$SSSD_USER" != xroot], [
+        AC_MSG_ERROR(['--disable-linux-caps' requires SSSD to be run as root and is incompatible with --with-sssd-user=$SSSD_USER])
+    ], [])
 ])
+
 AC_PATH_PROG([SETCAP], [setcap], [false])
 AS_IF([test x$SETCAP == xfalse], [
     AC_MSG_WARN([setcap missing, capabilities cannot be set during make install])
@@ -542,6 +552,13 @@ AM_CHECK_NSS_WRAPPER
 AM_CHECK_PAM_WRAPPER
 AM_CHECK_TEST_CA
 AX_VALGRIND_CHECK
+
+AS_IF([test x$VALGRIND_ENABLED = xyes], [
+    AC_CHECK_HEADERS([valgrind/valgrind.h],,AC_MSG_ERROR([valgrind-devel required with valgrind enabled]))
+], [
+    AC_CHECK_HEADERS([valgrind/valgrind.h])
+])
+
 
 # Check if the user wants SSSD to be compiled with systemtap probes
 AM_CHECK_SYSTEMTAP
@@ -563,6 +580,7 @@ AC_DEFINE_UNQUOTED([ABS_SRC_DIR], ["$my_srcdir"], [Absolute path to the source d
 
 AC_CONFIG_FILES([Makefile contrib/sssd.spec src/examples/rwtab src/doxy.config
                  contrib/sssd-pcsc.rules contrib/90-sssd-token-access.rules
+                 contrib/sssd-realmd.rules
                  contrib/sssd-tmpfiles.conf
                  src/examples/logrotate
                  src/sysv/sssd src/sysv/gentoo/sssd src/sysv/gentoo/sssd-kcm
@@ -575,8 +593,6 @@ AC_CONFIG_FILES([Makefile contrib/sssd.spec src/examples/rwtab src/doxy.config
                  src/lib/certmap/sss_certmap.pc src/lib/certmap/sss_certmap.doxy
                  src/sss_client/idmap/sss_nss_idmap.pc
                  src/sss_client/idmap/sss_nss_idmap.doxy
-                 src/lib/sifp/sss_simpleifp.pc
-                 src/lib/sifp/sss_simpleifp.doxy
                  src/config/setup.py
                  src/systemtap/sssd.stp
                  src/tools/analyzer/Makefile

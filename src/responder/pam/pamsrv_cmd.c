@@ -210,6 +210,7 @@ static int extract_authtok_v2(struct sss_auth_token *tok,
     case SSS_AUTHTOK_TYPE_PASSKEY:
     case SSS_AUTHTOK_TYPE_PASSKEY_KRB:
     case SSS_AUTHTOK_TYPE_PASSKEY_REPLY:
+    case SSS_AUTHTOK_TYPE_PAM_STACKED:
         ret = sss_authtok_set(tok, auth_token_type,
                               auth_token_data, auth_token_length);
         break;
@@ -963,16 +964,6 @@ static errno_t pam_eval_local_auth_policy(TALLOC_CTX *mem_ctx,
     char **opts;
     size_t c;
 
-#ifdef BUILD_FILES_PROVIDER
-    if (is_files_provider(preq->domain)) {
-        *_sc_allow = true;
-        *_passkey_allow = false;
-        *_local_policy = NULL;
-
-        return EOK;
-    }
-#endif
-
     tmp_ctx = talloc_new(NULL);
     if (tmp_ctx == NULL) {
         return ENOMEM;
@@ -1100,6 +1091,7 @@ static errno_t get_password_for_cache_auth(struct sss_auth_token *authtok,
 
     switch (sss_authtok_get_type(authtok)) {
     case SSS_AUTHTOK_TYPE_PASSWORD:
+    case SSS_AUTHTOK_TYPE_PAM_STACKED:
         ret = sss_authtok_get_password(authtok, password, NULL);
         break;
     case SSS_AUTHTOK_TYPE_2FA:
@@ -1417,8 +1409,7 @@ void pam_reply(struct pam_auth_req *preq)
         preq->domain &&
         preq->domain->cache_credentials &&
         !pd->offline_auth &&
-        !pd->last_auth_saved &&
-        !is_files_provider(preq->domain)) {
+        !pd->last_auth_saved) {
         ret = set_last_login(preq);
         if (ret != EOK) {
             goto done;

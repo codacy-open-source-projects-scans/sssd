@@ -1612,7 +1612,7 @@ static int send_and_receive(pam_handle_t *pamh, struct pam_items *pi,
             break;
         default:
             D(("Illegal task [%#x]", task));
-            return PAM_SYSTEM_ERR;
+            pam_status = PAM_SYSTEM_ERR;
     }
 
 done:
@@ -2472,6 +2472,8 @@ static void eval_argv(pam_handle_t *pamh, int argc, const char **argv,
             }
         } else if (strcmp(*argv, "quiet") == 0) {
             *quiet_mode = true;
+        } else if (strcmp(*argv, "allow_chauthtok_by_root") == 0) {
+            *flags |= PAM_CLI_FLAGS_ALLOW_CHAUTHTOK_BY_ROOT;
         } else if (strcmp(*argv, "ignore_unknown_user") == 0) {
             *flags |= PAM_CLI_FLAGS_IGNORE_UNKNOWN_USER;
         } else if (strcmp(*argv, "ignore_authinfo_unavail") == 0) {
@@ -2557,7 +2559,7 @@ static int get_authtok_for_authentication(pam_handle_t *pamh,
             || ( pi->pamstack_authtok != NULL
                     && *(pi->pamstack_authtok) != '\0'
                     && !(flags & PAM_CLI_FLAGS_PROMPT_ALWAYS))) {
-        pi->pam_authtok_type = SSS_AUTHTOK_TYPE_PASSWORD;
+        pi->pam_authtok_type = SSS_AUTHTOK_TYPE_PAM_STACKED;
         pi->pam_authtok = strdup(pi->pamstack_authtok);
         if (pi->pam_authtok == NULL) {
             D(("option use_first_pass set, but no password found"));
@@ -2620,7 +2622,8 @@ static int get_authtok_for_authentication(pam_handle_t *pamh,
         }
 
         if (flags & PAM_CLI_FLAGS_FORWARD_PASS) {
-            if (pi->pam_authtok_type == SSS_AUTHTOK_TYPE_PASSWORD) {
+            if (pi->pam_authtok_type == SSS_AUTHTOK_TYPE_PASSWORD
+                || pi->pam_authtok_type == SSS_AUTHTOK_TYPE_PAM_STACKED) {
                 ret = pam_set_item(pamh, PAM_AUTHTOK, pi->pam_authtok);
             } else if (pi->pam_authtok_type == SSS_AUTHTOK_TYPE_SC_PIN) {
                 pin = sss_auth_get_pin_from_sc_blob((uint8_t *) pi->pam_authtok,
@@ -2756,7 +2759,7 @@ static int get_authtok_for_password_change(pam_handle_t *pamh,
     }
 
     if (pam_flags & PAM_PRELIM_CHECK) {
-        if (getuid() == 0 && !exp_data )
+        if (!(flags & PAM_CLI_FLAGS_ALLOW_CHAUTHTOK_BY_ROOT) && getuid() == 0 && !exp_data )
             return PAM_SUCCESS;
 
         if (flags & PAM_CLI_FLAGS_USE_2FA
