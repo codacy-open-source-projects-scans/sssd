@@ -6,12 +6,13 @@ SSSD Authentication Test Cases
 
 from __future__ import annotations
 
+import re
 from inspect import cleandoc
 
 import pytest
 from sssd_test_framework.roles.client import Client
 from sssd_test_framework.roles.generic import GenericProvider
-from sssd_test_framework.roles.ldap import LDAP
+from sssd_test_framework.roles.kdc import KDC
 from sssd_test_framework.topology import KnownTopology, KnownTopologyGroup
 
 
@@ -234,67 +235,6 @@ def test_authentication__user_login_when_the_provider_is_offline(
 
 
 @pytest.mark.topology(KnownTopologyGroup.AnyProvider)
-@pytest.mark.preferred_topology(KnownTopology.LDAP)
-@pytest.mark.parametrize(
-    "home_key",
-    ["user", "uid", "fqn", "domain", "first_char", "upn", "default", "lowercase", "substring", "literal%"],
-)
-@pytest.mark.importance("medium")
-def test_authentication__user_login_with_overriding_home_directory(
-    client: Client, provider: GenericProvider, home_key: str
-):
-    """
-    :title: Override the user's home directory
-    :description:
-        For simplicity, the home directory is set to '/home/user1' because some providers homedirs are different.
-    :setup:
-        1. Create user and set home directory to '/home/user1'
-        2. Configure SSSD with 'override_homedir' home_key value and restart SSSD
-        3. Get entry for 'user1'
-    :steps:
-        1. Login as 'user1' and check working directory
-    :expectedresults:
-        1. Login is successful and working directory matches the expected value
-    :customerscenario: False
-    """
-    provider.user("user1").add(password="Secret123", home="/home/user1")
-    client.sssd.common.mkhomedir()
-    client.sssd.start()
-
-    user = client.tools.getent.passwd("user1")
-    assert user is not None
-
-    home_map: dict[str, list[str]] = {
-        "user": ["/home/%u", f"/home/{user.name}"],
-        "uid": ["/home/%U", f"/home/{user.uid}"],
-        "fqn": ["/home/%f", f"/home/{user.name}@{client.sssd.default_domain}"],
-        "domain": ["/home/%d/%u", f"/home/{client.sssd.default_domain}/{user.name}"],
-        "first_char": ["/home/%l", f"/home/{str(user.name)[0]}"],
-        "upn": ["/home/%P", f"/home/{user.name}@{provider.domain.upper()}"],
-        "default": ["%o", f"{user.home}"],
-        "lowercase": ["%h", f"{str(user.home).lower()}"],
-        "substring": ["%H/%u", f"/home/homedir/{user.name}"],
-        "literal%": ["/home/%%/%u", f"/home/%/{user.name}"],
-    }
-
-    if home_key == "upn" and isinstance(provider, LDAP):
-        pytest.skip("Skipping provider, userPrincipal attribute is not set!")
-
-    if home_key == "domain":
-        client.fs.mkdir_p(f"/home/{client.sssd.default_domain}")
-
-    home_fmt, home_exp = home_map[home_key]
-    client.sssd.domain["homedir_substring"] = "/home/homedir"
-    client.sssd.domain["override_homedir"] = home_fmt
-    client.sssd.restart(clean=True)
-
-    with client.ssh("user1", "Secret123") as ssh:
-        result = ssh.run("pwd").stdout
-        assert result is not None, "Getting path failed!"
-        assert result == home_exp, f"Current path {result} is not {home_exp}!"
-
-
-@pytest.mark.topology(KnownTopologyGroup.AnyProvider)
 @pytest.mark.parametrize("method", ["ssh", "su"])
 @pytest.mark.parametrize("sssd_service_user", ("root", "sssd"))
 @pytest.mark.importance("medium")
@@ -367,3 +307,80 @@ def test_authentication__user_login_with_modified_PAM_stack_provider_is_offline(
 
     finally:
         client.host.conn.exec(["authselect", "backup-restore", "mybackup"])
+
+
+@pytest.mark.importance("critical")
+@pytest.mark.topology(KnownTopology.IPA)
+@pytest.mark.topology(KnownTopology.Samba)
+@pytest.mark.topology(KnownTopology.AD)
+def test_disable_an2ln(client: Client, provider: GenericProvider):
+    """
+    :title: Check localauth plugin config file (IPA/AD version)
+    :setup:
+        1. Create user
+    :steps:
+        1. Login as user
+        2. Run klist
+        3. Read localauth plugin config file
+    :expectedresults:
+        1. User can log in
+        2. Kerberos TGT is available
+        3. localauth plugin config file is present and has expected content
+    :customerscenario: False
+    """
+    provider.user("tuser").add()
+
+    pattern = (
+        r"\[plugins\]\n localauth = {\n  disable = an2ln\n"
+        "  module = sssd:/.*/sssd/modules/sssd_krb5_localauth_plugin.so\n }"
+    )
+
+    client.fs.rm("/var/lib/sss/pubconf/krb5.include.d/localauth_plugin")
+    client.sssd.start()
+
+    with client.ssh("tuser", "Secret123") as ssh:
+        with client.auth.kerberos(ssh) as krb:
+            result = krb.klist()
+            assert f"krbtgt/{provider.realm}@{provider.realm}" in result.stdout
+
+    try:
+        out = client.fs.read("/var/lib/sss/pubconf/krb5.include.d/localauth_plugin")
+    except Exception as e:
+        assert False, f"Reading plugin config file caused exception: {e}"
+
+    assert re.match(pattern, out), "Content of plugin config file does not match"
+
+
+@pytest.mark.importance("high")
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ensure_localauth_plugin_is_not_configured(client: Client, provider: GenericProvider, kdc: KDC):
+    """
+    :title: Check localauth plugin config file (LDAP with Kerberos version)
+    :setup:
+        1. Create user in LDAP and KDC
+        2. Setup SSSD to use Kerberos authentication
+    :steps:
+        1. Login as user
+        2. Run klist
+        3. Read localauth plugin config file
+    :expectedresults:
+        1. User can log in
+        2. Kerberos TGT is available
+        3. localauth plugin config file is not present
+    :customerscenario: False
+    """
+    provider.user("tuser").add()
+    kdc.principal("tuser").add()
+
+    client.sssd.common.krb5_auth(kdc)
+
+    client.fs.rm("/var/lib/sss/pubconf/krb5.include.d/localauth_plugin")
+    client.sssd.start()
+
+    with client.ssh("tuser", "Secret123") as ssh:
+        with client.auth.kerberos(ssh) as krb:
+            result = krb.klist()
+            assert f"krbtgt/{kdc.realm}@{kdc.realm}" in result.stdout
+
+    with pytest.raises(Exception):
+        client.fs.read("/var/lib/sss/pubconf/krb5.include.d/localauth_plugin")
