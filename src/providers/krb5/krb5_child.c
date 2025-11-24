@@ -33,6 +33,7 @@
 
 #include <security/pam_modules.h>
 
+#include "util/child_bootstrap.h"
 #include "util/util.h"
 #include "util/sss_krb5.h"
 #include "util/user_info_msg.h"
@@ -553,7 +554,7 @@ static krb5_error_code tokeninfo_matches(TALLOC_CTX *mem_ctx,
               "Unsupported authtok type %d\n", sss_authtok_get_type(auth_tok));
     }
 
-    return EAGAIN;
+    return ERR_CHECK_NEXT_AUTH_TYPE;
 }
 
 static krb5_error_code answer_otp(krb5_context ctx,
@@ -603,7 +604,7 @@ static krb5_error_code answer_otp(krb5_context ctx,
         /* Allocation errors are ignored on purpose */
 
         DEBUG(SSSDBG_TRACE_INTERNAL, "Exit answer_otp during pre-auth.\n");
-        return EAGAIN;
+        return ERR_CHECK_NEXT_AUTH_TYPE;
     }
 
     /* Find the first supported tokeninfo which matches our authtoken. */
@@ -773,14 +774,14 @@ static krb5_error_code answer_pkinit(krb5_context ctx,
             DEBUG(SSSDBG_MINOR_FAILURE,
                   "Unexpected authentication token type [%s]\n",
                   sss_authtok_type_to_str(sss_authtok_get_type(kr->pd->authtok)));
-            kerr = EAGAIN;
+            kerr = ERR_CHECK_NEXT_AUTH_TYPE;
             goto done;
         }
     } else {
         /* We only expect SSS_PAM_PREAUTH here, but also for all other
          * commands the graceful solution would be to let the caller
          * check other authentication methods as well. */
-        kerr = EAGAIN;
+        kerr = ERR_CHECK_NEXT_AUTH_TYPE;
     }
 
 done:
@@ -910,7 +911,7 @@ static krb5_error_code answer_idp_oauth2(krb5_context kctx,
     if (type != SSS_AUTHTOK_TYPE_OAUTH2) {
         DEBUG(SSSDBG_MINOR_FAILURE, "Unexpected authentication token type [%s]\n",
               sss_authtok_type_to_str(type));
-        kerr = EAGAIN;
+        kerr = ERR_CHECK_NEXT_AUTH_TYPE;
         goto done;
     }
 
@@ -1137,7 +1138,7 @@ static krb5_error_code answer_passkey(krb5_context kctx,
     if (type != SSS_AUTHTOK_TYPE_PASSKEY_REPLY) {
         DEBUG(SSSDBG_MINOR_FAILURE, "Unexpected authentication token type [%s]\n",
               sss_authtok_type_to_str(type));
-        kerr = EAGAIN;
+        kerr = ERR_CHECK_NEXT_AUTH_TYPE;
         goto done;
     }
 
@@ -1228,7 +1229,7 @@ static krb5_error_code answer_password(krb5_context kctx,
 
     /* For SSS_PAM_PREAUTH and the other remaining commands the caller should
      * continue to iterate over the available authentication methods. */
-    return EAGAIN;
+    return ERR_CHECK_NEXT_AUTH_TYPE;
 }
 
 static krb5_error_code sss_krb5_responder(krb5_context ctx,
@@ -1253,12 +1254,12 @@ static krb5_error_code sss_krb5_responder(krb5_context ctx,
             /* It is expected that the answer_*() functions only return EOK
              * (success) if the authentication was successful, i.e. during
              * SSS_PAM_AUTHENTICATE. In all other cases, e.g. during
-             * SSS_PAM_PREAUTH either EAGAIN should be returned to indicate
-             * that the other available authentication methods should be
-             * checked as well. Or some other error code to indicate a fatal
-             * error where no other methods should be tried.
-             * Especially if setting the answer failed neither EOK nor EAGAIN
-             * should be returned. */
+             * SSS_PAM_PREAUTH either ERR_CHECK_NEXT_AUTH_TYPE should be
+             * returned to indicate that the other available authentication
+             * methods should be checked as well. Or some other error code to
+             * indicate a fatal error where no other methods should be tried.
+             * Especially if setting the answer failed neither EOK nor
+             * ERR_CHECK_NEXT_AUTH_TYPE should be returned. */
             if (strcmp(question_list[c],
                        KRB5_RESPONDER_QUESTION_PASSWORD) == 0) {
                 kerr = answer_password(ctx, kr, rctx);
@@ -1288,7 +1289,7 @@ static krb5_error_code sss_krb5_responder(krb5_context ctx,
             /* Continue to the next question when the given authtype cannot be
              * handled by the answer_* function. This allows fallback between auth
              * types, such as passkey -> password. */
-            if (kerr == EAGAIN) {
+            if (kerr == ERR_CHECK_NEXT_AUTH_TYPE) {
                 /* During pre-auth iterating over all authentication methods
                  * is expected and no message will be displayed. */
                 if (kr->pd->cmd == SSS_PAM_AUTHENTICATE) {
@@ -1306,17 +1307,18 @@ static krb5_error_code sss_krb5_responder(krb5_context ctx,
         kerr = answer_password(ctx, kr, rctx);
     }
 
-    /* During SSS_PAM_PREAUTH 'EAGAIN' is expected because we will run
-     * through all offered authentication methods and all are expect to return
-     * 'EAGAIN' in the positive case to indicate that the other methods should
-     * be checked as well. If all methods are checked we are done and should
-     * return success.
-     * In the other steps, especially SSS_PAM_AUTHENTICATE, having 'EAGAIN' at
-     * this stage would mean that no method feels responsible for the provided
-     * credentials i.e. authentication failed and we should return an error.
+    /* During SSS_PAM_PREAUTH 'ERR_CHECK_NEXT_AUTH_TYPE' is expected because we
+     * will run through all offered authentication methods and all are expect to
+     * return 'ERR_CHECK_NEXT_AUTH_TYPE' in the positive case to indicate that
+     * the other methods should be checked as well. If all methods are checked
+     * we are done and should return success.
+     * In the other steps, especially SSS_PAM_AUTHENTICATE, having
+     * 'ERR_CHECK_NEXT_AUTH_TYPE' at this stage would mean that no method feels
+     * responsible for the provided credentials i.e. authentication failed and
+     * we should return an error.
      */
     if (kr->pd->cmd == SSS_PAM_PREAUTH) {
-        return kerr == EAGAIN ? 0 : kerr;
+        return kerr == ERR_CHECK_NEXT_AUTH_TYPE ? 0 : kerr;
     } else {
         return kerr;
     }
@@ -2322,6 +2324,11 @@ static krb5_error_code get_and_save_tgt(struct krb5_req *kr,
             KRB5_CHILD_DEBUG(SSSDBG_CRIT_FAILURE, kerr);
 
             if (kerr == EAGAIN) {
+                /* The most probable reason for krb5_get_init_creds_password()
+                 * to return EAGAIN is a temporary failure getaddrinfo() i.e.
+                 * DNS currently does not work reliable. In this case it makes
+                 * sense to return KRB5_KDC_UNREACH to tell the backend to try
+                 * other KDCs or switch into offline mode. */
                 kerr = KRB5_KDC_UNREACH;
             }
 
@@ -4073,28 +4080,21 @@ int main(int argc, const char *argv[])
     uint32_t offline;
     int opt;
     poptContext pc;
-    int dummy = 1;
-    int backtrace = 1;
-    int debug_fd = -1;
-    const char *opt_logger = NULL;
     errno_t ret;
     krb5_error_code kerr;
-    long chain_id = 0;
     struct cli_opts cli_opts = { 0 };
     int sss_creds_password = 0;
     long dummy_long = 0;
 
+    /* Don't touch PR_SET_DUMPABLE as 'krb5_child' handles host keytab.
+     * Rely on system settings instead: this flag "is reset to the
+     * current value contained in the file /proc/sys/fs/suid_dumpable"
+     * when "the process executes a program that has file capabilities".
+     */
+    sss_child_basic_settings.ignore_dumpable = true;
 
     struct poptOption long_options[] = {
-        POPT_AUTOHELP
-        SSSD_DEBUG_OPTS
-        {"dumpable", 0, POPT_ARG_INT, &dummy, 0,
-         _("Ignored, /proc/sys/fs/suid_dumpable setting is in force"), NULL },
-        {"backtrace", 0, POPT_ARG_INT, &backtrace, 0,
-         _("Enable debug backtrace"), NULL },
-        {"debug-fd", 0, POPT_ARG_INT, &debug_fd, 0,
-         _("An open file descriptor for the debug logs"), NULL},
-        SSSD_LOGGER_OPTS
+        SSSD_BASIC_CHILD_OPTS
         {CHILD_OPT_FAST_USE_ANONYMOUS_PKINIT, 0, POPT_ARG_NONE, NULL, 'A',
           _("Use anonymous PKINIT to request FAST armor ticket"), NULL},
         {CHILD_OPT_REALM, 0, POPT_ARG_STRING, &cli_opts.realm, 0,
@@ -4112,8 +4112,6 @@ int main(int argc, const char *argv[])
          _("Requests canonicalization of the principal name"), NULL},
         {CHILD_OPT_SSS_CREDS_PASSWORD, 0, POPT_ARG_NONE, &sss_creds_password,
          0, _("Use custom version of krb5_get_init_creds_password"), NULL},
-        {"chain-id", 0, POPT_ARG_LONG, &chain_id,
-         0, _("Tevent chain ID used for logging purposes"), NULL},
         {CHILD_OPT_CHECK_PAC, 0, POPT_ARG_LONG, &dummy_long, 0,
          _("Check PAC flags"), NULL},
         POPT_TABLEEND
@@ -4154,34 +4152,10 @@ int main(int argc, const char *argv[])
 
     poptFreeContext(pc);
 
-    /* Don't touch PR_SET_DUMPABLE as 'krb5_child' handles host keytab.
-     * Rely on system settings instead: this flag "is reset to the
-     * current value contained in the file /proc/sys/fs/suid_dumpable"
-     * when "the process executes a program that has file capabilities".
-     */
-
-    debug_prg_name = talloc_asprintf(NULL, "krb5_child[%d]", getpid());
-    if (!debug_prg_name) {
-        debug_prg_name = "krb5_child";
-        ERROR("talloc_asprintf failed.\n");
-        ret = ENOMEM;
-        goto done;
+    sss_child_basic_settings.name = "krb5_child";
+    if (!sss_child_setup_basics(&sss_child_basic_settings)) {
+        _exit(-1);
     }
-
-    if (debug_fd != -1) {
-        opt_logger = sss_logger_str[FILES_LOGGER];
-        ret = set_debug_file_from_fd(debug_fd);
-        if (ret != EOK) {
-            opt_logger = sss_logger_str[STDERR_LOGGER];
-            ERROR("set_debug_file_from_fd failed.\n");
-        }
-    }
-
-    sss_chain_id_set_format(DEBUG_CHAIN_ID_FMT_RID);
-    sss_chain_id_set((uint64_t)chain_id);
-
-    DEBUG_INIT(debug_level, opt_logger);
-    sss_set_debug_backtrace_enable((backtrace == 0) ? false : true);
 
     sss_log_process_caps("Starting");
 
