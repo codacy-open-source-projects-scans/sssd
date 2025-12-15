@@ -12,12 +12,10 @@ dist_noinst_DATA = \
     ds.py \
     ds_openldap.py \
     ent.py \
-    ent_test.py \
     ldap_ent.py \
     util.py \
     test_enumeration.py \
     test_memory_cache.py \
-    test_session_recording.py \
     test_netgroup.py \
     files_ops.py \
     kdc.py \
