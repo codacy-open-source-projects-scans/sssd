@@ -156,7 +156,9 @@ if HAVE_GCC
                  -std=gnu99
 endif
 
-CMOCKA_CFLAGS = -fno-lto
+# Older Fedora versions still have cmocka < 2.0.0 making it
+# inconvinient to support two interfaces
+CMOCKA_CFLAGS = -fno-lto -Wno-error=deprecated-declarations
 
 pkgconfig_DATA =
 
@@ -2434,7 +2436,8 @@ test_sbus_message_SOURCES = \
     src/tests/cmocka/sbus/test_sbus_message.c \
     $(NULL)
 test_sbus_message_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_sbus_message_LDADD = \
     $(CMOCKA_LIBS) \
     $(POPT_LIBS) \
@@ -2448,7 +2451,8 @@ test_sbus_opath_SOURCES = \
     src/tests/cmocka/sbus/test_sbus_opath.c \
     $(NULL)
 test_sbus_opath_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_sbus_opath_LDADD = \
     $(CMOCKA_LIBS) \
     $(POPT_LIBS) \
@@ -2600,6 +2604,7 @@ if BUILD_PASSKEY
 endif # BUILD_PASSKEY
 test_pamsrv_json_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_pamsrv_json_LDFLAGS = \
     -Wl,-wrap,json_array_append_new \
@@ -2625,6 +2630,7 @@ test_sss_pam_data_SOURCES = \
     $(NULL)
 test_sss_pam_data_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sss_pam_data_LDFLAGS = \
     $(NULL)
@@ -2699,6 +2705,7 @@ config_check_tests_SOURCES = \
     $(NULL)
 config_check_tests_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 config_check_tests_LDADD = \
     $(CMOCKA_LIBS) \
@@ -2716,6 +2723,7 @@ test_find_uid_SOURCES = \
     src/util/strtonum.c
 test_find_uid_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(TALLOC_CFLAGS) \
     $(DHASH_CFLAGS)
 if HAVE_SYSTEMD_UNIT
@@ -2736,7 +2744,8 @@ test_io_SOURCES = \
     src/util/io.c \
     src/tests/common.c
 test_io_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_io_LDADD = \
     $(CMOCKA_LIBS)
 
@@ -2749,6 +2758,7 @@ test_negcache_SOURCES = \
     src/tests/cmocka/test_negcache_2.c
 test_negcache_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(TALLOC_CFLAGS) \
     $(DHASH_CFLAGS)
 test_negcache_LDADD = \
@@ -2771,6 +2781,7 @@ test_authtok_SOURCES = \
     $(NULL)
 test_authtok_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(TALLOC_CFLAGS) \
     $(POPT_CFLAGS) \
     $(DHASH_CFLAGS) \
@@ -2790,6 +2801,7 @@ test_prompt_config_SOURCES = \
     $(NULL)
 test_prompt_config_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(POPT_CFLAGS) \
     $(NULL)
 test_prompt_config_LDADD = \
@@ -2817,7 +2829,8 @@ deskprofile_utils_tests_SOURCES = \
     src/providers/ipa/ipa_deskprofile_rules_util.c \
     src/providers/ipa/ipa_rules_common.c
 deskprofile_utils_tests_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 deskprofile_utils_tests_LDADD = \
     $(CMOCKA_LIBS) \
     $(SSSD_INTERNAL_LTLIBS) \
@@ -2855,7 +2868,8 @@ domain_resolution_order_tests_SOURCES = \
 	src/tests/cmocka/test_domain_resolution_order.c \
 	src/responder/common/cache_req/cache_req_domain.c
 domain_resolution_order_tests_CFLAGS = \
-	$(AM_CFLAGS)
+	$(AM_CFLAGS) \
+	$(CMOCKA_CFLAGS)
 domain_resolution_order_tests_LDADD = \
 	$(CMOCKA_LIBS) \
 	$(SSSD_INTERNAL_LTLIBS) \
@@ -2864,7 +2878,8 @@ domain_resolution_order_tests_LDADD = \
 fqnames_tests_SOURCES = \
     src/tests/cmocka/test_fqnames.c
 fqnames_tests_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 fqnames_tests_LDADD = \
     $(CMOCKA_LIBS) \
     $(SSSD_LIBS) \
@@ -2882,6 +2897,7 @@ nestedgroups_tests_SOURCES = \
     $(NULL)
 nestedgroups_tests_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     -DEXTERNAL_MEMBERS_CHUNK=1 \
     $(NULL)
 nestedgroups_tests_LDADD = \
@@ -2901,7 +2917,8 @@ endif
 test_sss_idmap_SOURCES = \
     src/tests/cmocka/test_sss_idmap.c
 test_sss_idmap_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_sss_idmap_LDADD = \
     $(CMOCKA_LIBS) \
     $(POPT_LIBS) \
@@ -2934,7 +2951,8 @@ if BUILD_SSH
 test_utils_SOURCES += src/tests/cmocka/test_sss_ssh.c
 endif
 test_utils_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_utils_CFLAGS += \
     $(P11_KIT_CFLAGS) \
     $(NULL)
@@ -2946,6 +2964,9 @@ test_utils_LDADD = \
 
 test_search_bases_SOURCES = \
     src/tests/cmocka/test_search_bases.c
+test_search_bases_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_search_bases_LDADD = \
     $(CMOCKA_LIBS) \
     $(TALLOC_LIBS) \
@@ -2961,6 +2982,9 @@ test_ldap_auth_SOURCES = \
     src/tests/cmocka/test_ldap_auth.c \
     src/tests/cmocka/test_expire_common.c \
     $(NULL)
+test_ldap_auth_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_ldap_auth_LDADD = \
     $(CMOCKA_LIBS) \
     $(TALLOC_LIBS) \
@@ -2974,6 +2998,9 @@ test_ldap_auth_LDADD = \
 test_ldap_id_cleanup_SOURCES = \
     src/tests/cmocka/test_ldap_id_cleanup.c \
     $(NULL)
+test_ldap_id_cleanup_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_ldap_id_cleanup_LDADD = \
     $(CMOCKA_LIBS) \
     $(POPT_LIBS) \
@@ -2991,6 +3018,9 @@ test_sdap_access_SOURCES = \
     src/tests/cmocka/test_sdap_access.c \
     src/tests/cmocka/test_expire_common.c \
     $(NULL)
+test_sdap_access_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_sdap_access_LDADD = \
     $(CMOCKA_LIBS) \
     $(TALLOC_LIBS) \
@@ -3007,6 +3037,7 @@ test_sdap_certmap_SOURCES = \
     $(NULL)
 test_sdap_certmap_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(TALLOC_CFLAGS) \
     $(POPT_CFLAGS) \
     $(NULL)
@@ -3021,6 +3052,9 @@ test_sdap_certmap_LDADD = \
 
 ad_access_filter_tests_SOURCES = \
     src/tests/cmocka/test_ad_access_filter.c
+ad_access_filter_tests_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 ad_access_filter_tests_LDADD = \
     $(CMOCKA_LIBS) \
     $(POPT_LIBS) \
@@ -3039,6 +3073,7 @@ ad_gpo_tests_SOURCES = \
     src/providers/ad/ad_gpo_child_utils.c
 ad_gpo_tests_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NDR_NBT_CFLAGS) \
     $(NULL)
 ad_gpo_tests_LDADD = \
@@ -3101,7 +3136,8 @@ dp_opt_tests_SOURCES = \
     src/providers/data_provider_opts.c \
     src/tests/cmocka/test_dp_opts.c
 dp_opt_tests_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 dp_opt_tests_LDADD = \
     $(CMOCKA_LIBS) \
     $(TALLOC_LIBS) \
@@ -3152,7 +3188,8 @@ ifp_tests_SOURCES = \
     src/responder/ifp/ifpsrv_util.c \
     $(NULL)
 ifp_tests_CFLAGS = \
-    $(AM_CFLAGS)
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 ifp_tests_LDADD = \
     $(LIBADD_DL) \
     $(CMOCKA_LIBS) \
@@ -3169,6 +3206,7 @@ test_sysdb_views_SOURCES = \
     $(NULL)
 test_sysdb_views_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_views_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3185,6 +3223,7 @@ test_sysdb_ts_cache_SOURCES = \
     $(NULL)
 test_sysdb_ts_cache_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_ts_cache_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3200,6 +3239,7 @@ test_sysdb_subdomains_SOURCES = \
     $(NULL)
 test_sysdb_subdomains_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_subdomains_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3215,6 +3255,7 @@ test_sysdb_certmap_SOURCES = \
     $(NULL)
 test_sysdb_certmap_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_certmap_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3230,6 +3271,7 @@ test_sysdb_sudo_SOURCES = \
     $(NULL)
 test_sysdb_sudo_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_sudo_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3245,6 +3287,7 @@ test_sysdb_utils_SOURCES = \
     $(NULL)
 test_sysdb_utils_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_utils_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3260,6 +3303,7 @@ test_sysdb_domain_resolution_order_SOURCES = \
     $(NULL)
 test_sysdb_domain_resolution_order_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sysdb_domain_resolution_order_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3277,6 +3321,7 @@ test_be_ptask_SOURCES = \
     $(NULL)
 test_be_ptask_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_be_ptask_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3294,6 +3339,7 @@ test_copy_ccache_SOURCES = \
     $(NULL)
 test_copy_ccache_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_copy_ccache_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3313,6 +3359,7 @@ test_copy_keytab_SOURCES = \
     $(NULL)
 test_copy_keytab_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_copy_keytab_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3412,6 +3459,7 @@ test_fo_srv_SOURCES = \
     $(NULL)
 test_fo_srv_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_fo_srv_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3430,6 +3478,7 @@ test_sdap_initgr_SOURCES = \
     $(NULL)
 test_sdap_initgr_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NDR_NBT_CFLAGS) \
     $(NULL)
 test_sdap_initgr_LDADD = \
@@ -3452,6 +3501,7 @@ test_ad_subdom_SOURCES = \
     $(NULL)
 test_ad_subdom_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NDR_NBT_CFLAGS) \
     $(NULL)
 test_ad_subdom_LDADD = \
@@ -3475,6 +3525,7 @@ test_ipa_subdom_util_SOURCES = \
     $(NULL)
 test_ipa_subdom_util_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_ipa_subdom_util_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3533,6 +3584,7 @@ test_tools_colondb_SOURCES = \
     $(NULL)
 test_tools_colondb_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_tools_colondb_LDFLAGS = \
     $(NULL)
@@ -3550,6 +3602,7 @@ test_krb5_wait_queue_SOURCES = \
     $(NULL)
 test_krb5_wait_queue_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_krb5_wait_queue_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3648,6 +3701,7 @@ test_dp_builtin_SOURCES = \
     $(NULL)
 test_dp_builtin_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     -DUNIT_TESTING \
     $(NULL)
 test_dp_builtin_LDFLAGS = \
@@ -3664,6 +3718,9 @@ test_ipa_dn_SOURCES = \
     src/providers/ipa/ipa_dn.c \
     src/tests/cmocka/test_ipa_dn.c \
     $(NULL)
+test_ipa_dn_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS)
 test_ipa_dn_LDADD = \
     $(CMOCKA_LIBS) \
     $(POPT_LIBS) \
@@ -3680,6 +3737,7 @@ test_iobuf_SOURCES = \
     $(NULL)
 test_iobuf_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_iobuf_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3692,6 +3750,7 @@ test_confdb_SOURCES = \
     $(NULL)
 test_confdb_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_confdb_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3712,6 +3771,7 @@ simple_access_tests_SOURCES = \
     $(NULL)
 simple_access_tests_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 simple_access_tests_LDFLAGS = \
     $(NULL)
@@ -3731,6 +3791,7 @@ krb5_common_test_SOURCES = \
 krb5_common_test_CFLAGS = \
     $(KRB5_CFLAGS) \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 krb5_common_test_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3750,6 +3811,7 @@ test_inotify_SOURCES = \
     $(NULL)
 test_inotify_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_inotify_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3766,6 +3828,7 @@ sss_certmap_test_SOURCES = \
     $(NULL)
 sss_certmap_test_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(SSS_CERT_CFLAGS) \
     -I$(abs_builddir)/src \
     $(NULL)
@@ -3785,6 +3848,7 @@ test_sssd_krb5_locator_plugin_SOURCES = \
     $(NULL)
 test_sssd_krb5_locator_plugin_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(POPT_CFLAGS) \
     $(TALLOC_CFLAGS) \
     $(KRB5_CFLAGS) \
@@ -3809,6 +3873,7 @@ test_passkey_SOURCES = \
     $(NULL)
 test_passkey_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_passkey_LDFLAGS = \
     -Wl,-wrap,sleep \
@@ -3866,6 +3931,7 @@ test_kcm_marshalling_SOURCES = \
     $(NULL)
 test_kcm_marshalling_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(UUID_CFLAGS) \
     $(NULL)
 test_kcm_marshalling_LDADD = \
@@ -3884,6 +3950,7 @@ test_kcm_queue_SOURCES = \
     $(NULL)
 test_kcm_queue_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_kcm_queue_LDADD = \
     $(LIBADD_DL) \
@@ -3902,6 +3969,7 @@ test_krb5_idp_plugin_SOURCES = \
     $(NULL)
 test_krb5_idp_plugin_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_krb5_idp_plugin_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3916,6 +3984,7 @@ test_krb5_passkey_plugin_SOURCES = \
     $(NULL)
 test_krb5_passkey_plugin_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_krb5_passkey_plugin_LDADD = \
     $(CMOCKA_LIBS) \
@@ -3941,6 +4010,7 @@ test_kcm_renewals_SOURCES = \
 	$(NULL)
 test_kcm_renewals_CFLAGS = \
 	$(AM_CFLAGS) \
+	$(CMOCKA_CFLAGS) \
 	$(NULL)
 test_kcm_renewals_LDFLAGS = \
 	-Wl,-wrap,fstat
@@ -3986,6 +4056,7 @@ test_sssd_krb5_localauth_plugin_SOURCES = \
     $(NULL)
 test_sssd_krb5_localauth_plugin_CFLAGS = \
     $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
     $(NULL)
 test_sssd_krb5_localauth_plugin_LDADD = \
     $(CMOCKA_LIBS) \
