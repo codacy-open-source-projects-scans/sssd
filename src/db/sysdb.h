@@ -136,6 +136,10 @@
 #define SYSDB_DN_FOR_MEMBER_HASH_TABLE "dnForMemberHashTable"
 #define SYSDB_AD_SAMACCOUNTNAME "adSAMAccountName"
 
+#define SYSDB_ACCESS_TOKEN "accessToken"
+#define SYSDB_ID_TOKEN "idToken"
+#define SYSDB_REFRESH_TOKEN "refreshToken"
+
 #define SYSDB_ORIG_DN "originalDN"
 #define SYSDB_ORIG_OBJECTCLASS "originalObjectClass"
 #define SYSDB_ORIG_MODSTAMP "originalModifyTimestamp"
@@ -622,7 +626,7 @@ sysdb_subdomain_get_id_by_name(TALLOC_CTX *mem_ctx,
                                const char **_id);
 
 /* The utility function to create a subdomain sss_domain_info object is handy
- * for unit tests, so it should be available in a headerr.
+ * for unit tests, so it should be available in a header.
  */
 struct sss_domain_info *new_subdomain(TALLOC_CTX *mem_ctx,
                                       struct sss_domain_info *parent,

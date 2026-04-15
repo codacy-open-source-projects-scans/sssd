@@ -1,7 +1,7 @@
 /*
     SSSD
 
-    Helper child to commmunicate with SmartCard via OpenSSL
+    Helper child to communicate with SmartCard via OpenSSL
 
     Authors:
         Sumit Bose <sbose@redhat.com>
@@ -1135,7 +1135,7 @@ done:
     return ret;
 }
 
-/* Currently this funtion is only used the print the curve type in the debug
+/* Currently this function is only used to print the curve type in the debug
  * messages. */
 static void get_ec_curve_type(CK_FUNCTION_LIST *module,
                               CK_SESSION_HANDLE session,
@@ -1941,7 +1941,7 @@ errno_t do_slot(CK_FUNCTION_LIST *module, size_t module_id, CK_SLOT_ID slot_id,
                                          item->label, item->cert_b64);
         if (*_multi == NULL) {
             DEBUG(SSSDBG_CRIT_FAILURE,
-                  "Failed to append certiticate to the output string.\n");
+                  "Failed to append certificate to the output string.\n");
             ret = ENOMEM;
             goto done;
         }
@@ -1992,7 +1992,7 @@ errno_t do_card(TALLOC_CTX *mem_ctx, struct p11_ctx *p11_ctx,
     CK_TOKEN_INFO token_info;
     CK_INFO module_info;
     CK_RV rv;
-    size_t module_id;
+    size_t module_id = 0;
     P11KitUri *uri = NULL;
 
     *_multi = talloc_strdup(mem_ctx, "");

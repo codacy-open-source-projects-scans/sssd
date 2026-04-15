@@ -44,6 +44,21 @@ struct idp_init_ctx {
     const char *scope;
 };
 
+static void token_refresh_table_delete_cb(hash_entry_t *item,
+                                          hash_destroy_enum type,
+                                          void *pvt)
+{
+    struct idp_refresh_data *refresh_data = talloc_get_type(item->value.ptr,
+                                                       struct idp_refresh_data);
+
+    /* If the request is already in progress, its handler will free the data. */
+    if (refresh_data->req != NULL && tevent_req_is_in_progress(refresh_data->req)) {
+        return;
+    }
+
+    talloc_free(refresh_data);
+}
+
 static errno_t idp_get_options(TALLOC_CTX *mem_ctx,
                                struct confdb_ctx *cdb,
                                const char *conf_path,
@@ -128,9 +143,23 @@ errno_t sssm_idp_init(TALLOC_CTX *mem_ctx,
     init_ctx->scope = dp_opt_get_cstring(init_ctx->opts, IDP_ID_SCOPE);
     if (init_ctx->scope == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE,
-              "Missing required option 'idp_scope'.\n");
+              "Missing required option 'idp_id_scope'.\n");
         ret = EINVAL;
         goto done;
+    }
+
+    /* Check for old example value and correct it. */
+    if (strcmp(init_ctx->scope, "https%3A%2F%2Fgraph.microsoft.com%2F.default") == 0) {
+        DEBUG(SSSDBG_MINOR_FAILURE,
+              "Automatically correcting old example found in 'idp_id_scope'.\n");
+        init_ctx->scope = talloc_strdup(init_ctx,
+                                        "https://graph.microsoft.com/.default");
+        if (init_ctx->scope == NULL) {
+            DEBUG(SSSDBG_CRIT_FAILURE,
+                  "Failed to copy correct 'idp_id_scope'.\n");
+            ret = ENOMEM;
+            goto done;
+        }
     }
 
     *_module_data = init_ctx;
@@ -323,6 +352,19 @@ errno_t sssm_idp_auth_init(TALLOC_CTX *mem_ctx,
         DEBUG(SSSDBG_CRIT_FAILURE, "Failed to create hash table.\n");
         ret = ENOMEM;
         goto done;
+    }
+
+    if (dp_opt_get_bool(init_ctx->opts, IDP_AUTO_REFRESH)) {
+        auth_ctx->token_refresh_table = sss_ptr_hash_create(auth_ctx,
+                                                  token_refresh_table_delete_cb,
+                                                  NULL);
+        if (auth_ctx->token_refresh_table == NULL) {
+            DEBUG(SSSDBG_CRIT_FAILURE,
+                  "Failed to create hash table for token refreshes.\n");
+            ret = ENOMEM;
+            goto done;
+        }
+		/* TODO: schedule refreshes for tokens that are already in cache. */
     }
 
     auth_ctx->scope = dp_opt_get_cstring(init_ctx->opts, IDP_AUTH_SCOPE);
