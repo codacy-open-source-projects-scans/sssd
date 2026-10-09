@@ -173,7 +173,7 @@ _sbus_sss_args_sssd_DataProvider_Failover_ListServices = {
 const struct sbus_method_arguments
 _sbus_sss_args_sssd_ProxyChild_Auth_PAM = {
     .input = (const struct sbus_argument[]){
-        {.type = "issssssuayuayiu", .name = "pam_data"},
+        {.type = "issssssuayuayiuuuay", .name = "pam_data"},
         {NULL}
     },
     .output = (const struct sbus_argument[]){
@@ -225,8 +225,6 @@ _sbus_sss_args_sssd_dataprovider_getAccountDomain = {
         {NULL}
     },
     .output = (const struct sbus_argument[]){
-        {.type = "q", .name = "dp_error"},
-        {.type = "u", .name = "error"},
         {.type = "s", .name = "domain_name"},
         {NULL}
     }
@@ -244,9 +242,6 @@ _sbus_sss_args_sssd_dataprovider_getAccountInfo = {
         {NULL}
     },
     .output = (const struct sbus_argument[]){
-        {.type = "q", .name = "dp_error"},
-        {.type = "u", .name = "error"},
-        {.type = "s", .name = "error_message"},
         {NULL}
     }
 };
@@ -258,9 +253,6 @@ _sbus_sss_args_sssd_dataprovider_getDomains = {
         {NULL}
     },
     .output = (const struct sbus_argument[]){
-        {.type = "q", .name = "dp_error"},
-        {.type = "u", .name = "error"},
-        {.type = "s", .name = "error_message"},
         {NULL}
     }
 };
@@ -275,9 +267,6 @@ _sbus_sss_args_sssd_dataprovider_hostHandler = {
         {NULL}
     },
     .output = (const struct sbus_argument[]){
-        {.type = "q", .name = "dp_error"},
-        {.type = "u", .name = "error"},
-        {.type = "s", .name = "error_message"},
         {NULL}
     }
 };
@@ -285,7 +274,7 @@ _sbus_sss_args_sssd_dataprovider_hostHandler = {
 const struct sbus_method_arguments
 _sbus_sss_args_sssd_dataprovider_pamHandler = {
     .input = (const struct sbus_argument[]){
-        {.type = "issssssuayuayiu", .name = "pam_data"},
+        {.type = "issssssuayuayiuuuay", .name = "pam_data"},
         {NULL}
     },
     .output = (const struct sbus_argument[]){
@@ -305,9 +294,6 @@ _sbus_sss_args_sssd_dataprovider_resolverHandler = {
         {NULL}
     },
     .output = (const struct sbus_argument[]){
-        {.type = "q", .name = "dp_error"},
-        {.type = "u", .name = "error"},
-        {.type = "s", .name = "error_message"},
         {NULL}
     }
 };
@@ -318,9 +304,6 @@ _sbus_sss_args_sssd_dataprovider_sudoHandler = {
         {NULL}
     },
     .output = (const struct sbus_argument[]){
-        {.type = "q", .name = "dp_error"},
-        {.type = "u", .name = "error"},
-        {.type = "s", .name = "error_message"},
         {NULL}
     }
 };

@@ -389,23 +389,6 @@ AC_DEFUN([WITH_KRB5_CONF],
     AC_DEFINE_UNQUOTED([KRB5_CONF_PATH], ["$KRB5_CONF_PATH"], [KRB5 configuration file])
   ])
 
-AC_DEFUN([WITH_PYTHON2_BINDINGS],
-  [ AC_ARG_WITH([python2-bindings],
-                [AC_HELP_STRING([--with-python2-bindings],
-                                [Whether to build python2 bindings [no]])
-                ],
-                [],
-                [with_python2_bindings=no]
-               )
-    if test x"$with_python2_bindings" = xyes; then
-        AC_SUBST([HAVE_PYTHON2_BINDINGS], [yes])
-        AC_DEFINE_UNQUOTED([HAVE_PYTHON2_BINDINGS], [1],
-                           [Build with python2 bindings])
-    fi
-    AM_CONDITIONAL([BUILD_PYTHON2_BINDINGS],
-                   [test x"$with_python2_bindings" = xyes])
-  ])
-
 AC_DEFUN([WITH_PYTHON3_BINDINGS],
   [ AC_ARG_WITH([python3-bindings],
                 [AC_HELP_STRING([--with-python3-bindings],
@@ -973,3 +956,18 @@ AC_ARG_ENABLE([sensitive-logs],
 AS_IF([test x$enable_sensitive_logs = xyes],
       AC_DEFINE_UNQUOTED([ENABLE_SENSITIVE_LOGS], [1],
           [whether to enable logging sensitive data]))
+
+AC_DEFUN([WITH_VENDOR_DIR],
+  [ AC_ARG_WITH([vendordir],
+                  [AS_HELP_STRING([--with-vendordir=DIR],
+                                  [Directory for distribution provided configuration files])],
+                  [vendordir=$withval],
+                  [with_vendordir=no])
+    AS_IF([test x"$with_vendordir" != xno],
+          [
+            AC_DEFINE([USE_VENDORDIR], 1, [whether to use distribution provided configuration files]),
+            AC_DEFINE_UNQUOTED([SSSD_VENDOR_DIR], "$with_vendordir", [Directory for distribution provided configuration files])
+          ])
+    AC_SUBST(SSSD_VENDOR_DIR, [$vendordir])
+    AM_CONDITIONAL([HAVE_VENDORDIR], [test x"$with_vendordir" != xno])
+  ])

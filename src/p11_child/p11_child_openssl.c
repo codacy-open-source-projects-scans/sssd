@@ -199,8 +199,8 @@ static const EVP_MD *get_dgst(CK_MECHANISM_TYPE ocsp_dgst)
 
 static char *get_issuer_subject_str(TALLOC_CTX *mem_ctx, X509 *cert)
 {
-    X509_NAME *issuer_name;
-    X509_NAME *subject_name;
+    const X509_NAME *issuer_name;
+    const X509_NAME *subject_name;
     char *tmp_str = NULL;
     BIO *bio_mem = NULL;
     int ret;
@@ -291,9 +291,9 @@ static errno_t do_ocsp(struct p11_ctx *p11_ctx, X509 *cert)
     char *path = NULL;
     char *port = NULL;
     int use_ssl;
-    X509_NAME *issuer_name = NULL;
+    const X509_NAME *issuer_name = NULL;
     X509_OBJECT *x509_obj;
-    STACK_OF(X509_OBJECT) *store_objects;
+    STACK_OF(X509_OBJECT) *store_objects = NULL;
     const EVP_MD *ocsp_dgst = NULL;
     char *tmp_str;
 
@@ -335,7 +335,11 @@ static errno_t do_ocsp(struct p11_ctx *p11_ctx, X509 *cert)
         goto done;
     }
 
+#if OPENSSL_VERSION_NUMBER >= 0x30300000L
+    store_objects = X509_STORE_get1_objects(p11_ctx->x509_store);
+#else
     store_objects = X509_STORE_get0_objects(p11_ctx->x509_store);
+#endif
     if (store_objects == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "No objects found in certificate store, OCSP failed.\n");
@@ -424,8 +428,8 @@ static errno_t do_ocsp(struct p11_ctx *p11_ctx, X509 *cert)
     }
 
     ocsp_basic = OCSP_response_get1_basic(ocsp_resp);
-    if (ocsp_resp == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "OCSP_response_get1_basic failed.\n");
+    if (ocsp_basic == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "OCSP_response_get1_basic() failed.\n");
         ret = EIO;
         goto done;
     }
@@ -495,6 +499,9 @@ static errno_t do_ocsp(struct p11_ctx *p11_ctx, X509 *cert)
     ret = EOK;
 
 done:
+#if OPENSSL_VERSION_NUMBER >= 0x30300000L
+    sk_X509_OBJECT_pop_free(store_objects, X509_OBJECT_free);
+#endif
     OCSP_BASICRESP_free(ocsp_basic);
     OCSP_RESPONSE_free(ocsp_resp);
     OCSP_REQUEST_free(ocsp_req);
@@ -575,8 +582,6 @@ done:
 static int p11_ctx_destructor(struct p11_ctx *p11_ctx)
 {
     X509_STORE_free(p11_ctx->x509_store);
-
-    CRYPTO_cleanup_all_ex_data();
 
     return 0;
 }
@@ -966,7 +971,7 @@ static int read_certs(TALLOC_CTX *mem_ctx, CK_FUNCTION_LIST *module,
     CK_RV rv;
     struct cert_list *list = NULL;
     struct cert_list *item;
-    X509_NAME *tmp_name;
+    const X509_NAME *tmp_name;
     char *tmp_name_str;
 
     CK_OBJECT_CLASS cert_class = CKO_CERTIFICATE;
@@ -1222,9 +1227,9 @@ static int do_sha512(TALLOC_CTX *mem_ctx, CK_BYTE *in, size_t in_len,
         };
     const unsigned int info_len = add_info ? sizeof(info) : 0;
 
-    md_ctx = EVP_MD_CTX_create();
+    md_ctx = EVP_MD_CTX_new();
     if (md_ctx == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "EVP_MD_CTX_create failed.\n");
+        DEBUG(SSSDBG_OP_FAILURE, "EVP_MD_CTX_new failed.\n");
         return ENOMEM;
     }
 
@@ -1599,9 +1604,9 @@ static int sign_data(CK_FUNCTION_LIST *module, CK_SESSION_HANDLE session,
         goto done;
     }
 
-    md_ctx = EVP_MD_CTX_create();
+    md_ctx = EVP_MD_CTX_new();
     if (md_ctx == NULL) {
-        DEBUG(SSSDBG_OP_FAILURE, "EVP_MD_CTX_create failed.\n");
+        DEBUG(SSSDBG_OP_FAILURE, "EVP_MD_CTX_new failed.\n");
         ret = ENOMEM;
         goto done;
     }
@@ -1646,7 +1651,7 @@ static int sign_data(CK_FUNCTION_LIST *module, CK_SESSION_HANDLE session,
     ret = EOK;
 
 done:
-    EVP_MD_CTX_destroy(md_ctx);
+    EVP_MD_CTX_free(md_ctx);
     talloc_free(hash_val);
     talloc_free(signature);
     EVP_PKEY_free(cert_pub_key);
@@ -1761,7 +1766,8 @@ errno_t do_slot(CK_FUNCTION_LIST *module, size_t module_id, CK_SLOT_ID slot_id,
                 struct p11_ctx *p11_ctx, enum op_mode mode, const char *pin,
                 const char *module_name_in, const char *token_name_in,
                 const char *key_id_in, const char *label_in,
-                const char *uri_str, char **_multi) {
+                const char *uri_str, char **_multi)
+{
     int ret;
     CK_RV rv;
     char *module_file_name = NULL;
@@ -1773,6 +1779,7 @@ errno_t do_slot(CK_FUNCTION_LIST *module, size_t module_id, CK_SLOT_ID slot_id,
     struct cert_list *next_item = NULL;
     bool pkcs11_session = false;
     bool pkcs11_login = false;
+    bool has_protected_authentication_path = false;
 
     slot_name = p11_kit_space_strdup(info->slotDescription,
                                      sizeof(info->slotDescription));
@@ -1789,6 +1796,8 @@ errno_t do_slot(CK_FUNCTION_LIST *module, size_t module_id, CK_SLOT_ID slot_id,
         ret = ENOMEM;
         goto done;
     }
+
+    has_protected_authentication_path = (token_info->flags & CKF_PROTECTED_AUTHENTICATION_PATH);
 
     module_file_name = p11_kit_module_get_filename(module);
     if (module_file_name == NULL) {
@@ -1824,10 +1833,9 @@ errno_t do_slot(CK_FUNCTION_LIST *module, size_t module_id, CK_SLOT_ID slot_id,
     if (mode == OP_AUTH) {
         DEBUG(SSSDBG_TRACE_ALL, "Login required.\n");
         DEBUG(SSSDBG_TRACE_ALL, "Token flags [%lu].\n", token_info->flags);
-        if ((pin != NULL)
-            || (token_info->flags & CKF_PROTECTED_AUTHENTICATION_PATH)) {
+        if ((pin != NULL) || has_protected_authentication_path) {
 
-            if (token_info->flags & CKF_PROTECTED_AUTHENTICATION_PATH) {
+            if (has_protected_authentication_path) {
                 DEBUG(SSSDBG_TRACE_ALL, "Protected authentication path.\n");
                 pin = NULL;
             }
@@ -1936,9 +1944,12 @@ errno_t do_slot(CK_FUNCTION_LIST *module, size_t module_id, CK_SLOT_ID slot_id,
         DEBUG(SSSDBG_TRACE_ALL, "Found certificate has key id [%s].\n",
               item->id);
 
-        *_multi = talloc_asprintf_append(*_multi, "%s\n%s\n%s\n%s\n%s\n",
+        *_multi = talloc_asprintf_append(*_multi, "%s\n%s\n%s\n%s\n%s\n%s\n",
                                          token_name, module_file_name, item->id,
-                                         item->label, item->cert_b64);
+                                         item->label,
+                                         has_protected_authentication_path ?
+                                                               "true" : "false",
+                                         item->cert_b64);
         if (*_multi == NULL) {
             DEBUG(SSSDBG_CRIT_FAILURE,
                   "Failed to append certificate to the output string.\n");
@@ -2150,10 +2161,9 @@ errno_t do_card(TALLOC_CTX *mem_ctx, struct p11_ctx *p11_ctx,
                 rv = modules[c]->C_GetTokenInfo(slots[s], &token_info);
                 if (rv != CKR_OK) {
                     DEBUG(SSSDBG_OP_FAILURE,
-                          "C_GetTokenInfo failed [%lu][%s].\n",
+                          "C_GetTokenInfo failed [%lu][%s], skipping.\n",
                           rv, p11_kit_strerror(rv));
-                    ret = EIO;
-                    goto done;
+                    continue;
                 }
 
                 if (!(token_info.flags & CKF_TOKEN_INITIALIZED)) {

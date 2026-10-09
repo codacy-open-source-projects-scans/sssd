@@ -119,6 +119,14 @@ struct tevent_req *sdap_connect_send(TALLOC_CTX *memctx,
 
     timeout = dp_opt_get_int(state->opts->basic, SDAP_NETWORK_TIMEOUT);
 
+    ret = sdap_setup_libldap_global_options(state->opts->basic);
+    if (ret != EOK) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "sdap_setup_libldap_global_options failed [%d]: %s\n",
+              ret, sss_strerror(ret));
+        goto fail;
+    }
+
     subreq = sss_ldap_init_send(state, ev, state->uri, sockaddr,
                                 sockaddr_len, timeout);
     if (subreq == NULL) {
@@ -360,11 +368,7 @@ fail:
     if (ret) {
         tevent_req_error(req, ret);
     } else {
-        if (lret == LDAP_SERVER_DOWN) {
-            tevent_req_error(req, ETIMEDOUT);
-        } else {
-            tevent_req_error(req, EIO);
-        }
+        tevent_req_error(req, ERR_SERVER_FAILURE);
     }
     return;
 }
@@ -412,7 +416,7 @@ static void sdap_connect_done(struct sdap_op *op,
                              state->sh->ldap, ret);
         sss_log(SSS_LOG_ERR, "Could not start TLS encryption.");
         state->result = ret;
-        tevent_req_error(req, EIO);
+        tevent_req_error(req, ERR_SERVER_FAILURE);
         return;
     }
 
@@ -725,11 +729,7 @@ static struct tevent_req *simple_bind_send(TALLOC_CTX *memctx,
     return req;
 
 fail:
-    if (ret == LDAP_SERVER_DOWN) {
-        tevent_req_error(req, ETIMEDOUT);
-    } else {
-        tevent_req_error(req, ERR_NETWORK_IO);
-    }
+    tevent_req_error(req, ERR_SERVER_FAILURE);
     tevent_req_post(req, ev);
     return req;
 }
@@ -1007,7 +1007,7 @@ static struct tevent_req *sasl_bind_send(TALLOC_CTX *memctx,
     if (state->sh == NULL || state->sh->ldap == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Trying LDAP search while not connected.\n");
-        ret = ERR_NETWORK_IO;
+        ret = LDAP_SERVER_DOWN;
         goto fail;
     }
 
@@ -1037,7 +1037,7 @@ static struct tevent_req *sasl_bind_send(TALLOC_CTX *memctx,
 
 fail:
     if (ret == LDAP_SERVER_DOWN || ret == LDAP_TIMEOUT) {
-        tevent_req_error(req, ETIMEDOUT);
+        tevent_req_error(req, ERR_SERVER_FAILURE);
     } else {
         tevent_req_error(req, ERR_AUTH_FAILED);
     }
@@ -1215,13 +1215,13 @@ static void sdap_kinit_kdc_resolved(struct tevent_req *subreq)
     if (ret != EOK) {
         /* all servers have been tried and none
          * was found good, go offline */
-        tevent_req_error(req, ERR_NETWORK_IO);
+        tevent_req_error(req, ERR_NO_MORE_SERVERS);
         return;
     }
 
     DEBUG(SSSDBG_TRACE_LIBS, "KDC resolved, attempting to get TGT...\n");
 
-    tgtreq = sdap_get_tgt_send(state, state->ev, state->realm,
+    tgtreq = sdap_get_tgt_send(state, state->ev, NULL, state->realm,
                                state->principal, state->keytab,
                                state->lifetime, state->timeout);
     if (!tgtreq) {
@@ -1716,7 +1716,7 @@ static void sdap_cli_rootdse_done(struct tevent_req *subreq)
     ret = sdap_get_rootdse_recv(subreq, state, &state->rootdse);
     talloc_zfree(subreq);
     if (ret) {
-        if (ret == ETIMEDOUT) { /* retry another server */
+        if (ret == ERR_SERVER_FAILURE) { /* retry another server */
             tevent_req_error(req, ERR_SERVER_FAILURE);
             return;
         }
@@ -1962,7 +1962,7 @@ static void sdap_cli_auth_reconnect_done(struct tevent_req *subreq)
     /* End request if reconnecting failed to avoid endless loop */
     if (state->sh == NULL || !state->sh->connected) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Failed to reconnect.\n");
-        ret = EIO;
+        ret = ERR_SERVER_FAILURE;
         goto done;
     }
 
@@ -2021,7 +2021,7 @@ static void sdap_cli_rootdse_auth_done(struct tevent_req *subreq)
     ret = sdap_get_rootdse_recv(subreq, state, &state->rootdse);
     talloc_zfree(subreq);
     if (ret) {
-        if (ret == ETIMEDOUT) {
+        if (ret == ERR_SERVER_FAILURE) {
             /* The server we authenticated against went down. Retry another
              * one */
             tevent_req_error(req, ERR_SERVER_FAILURE);
@@ -2058,7 +2058,7 @@ int sdap_cli_connect_recv(struct tevent_req *req,
 {
     struct sdap_cli_connect_state *state = tevent_req_data(req,
                                              struct sdap_cli_connect_state);
-
+    errno_t ret;
     TEVENT_REQ_RETURN_ON_ERROR(req);
 
     if (gsh) {
@@ -2074,6 +2074,20 @@ int sdap_cli_connect_recv(struct tevent_req *req,
     }
 
     if (srv_opts) {
+        if (state->srv_opts == NULL) {
+            /* Always setup srv_opts to make sure it is never NULL (this can
+             * happen if rootdse_access == never or if rootDSE is not available
+             * on the server). */
+            ret = sdap_get_server_opts_from_rootdse(state, state->uri, NULL,
+                                                state->opts, &state->srv_opts);
+            if (ret) {
+                DEBUG(SSSDBG_OP_FAILURE,
+                      "Unable to setup server options [%d]: %s\n", ret,
+                      sss_strerror(ret));
+                return ret;
+            }
+        }
+
         *srv_opts = talloc_steal(memctx, state->srv_opts);
     }
 
@@ -2205,7 +2219,8 @@ static void sdap_cli_resolve_and_connect_kinit_done(struct tevent_req *subreq)
          * There's not much we can do except for going offline */
         DEBUG(SSSDBG_TRACE_FUNC,
               "Cannot get a TGT: ret [%d](%s)\n", ret, sss_strerror(ret));
-        tevent_req_error(req, EACCES);
+        state->can_retry = false;
+        tevent_req_error(req, ERR_SERVER_FAILURE);
         return;
     }
 
@@ -2256,7 +2271,7 @@ static void sdap_cli_resolve_and_connect_next_server_done(struct tevent_req *sub
         state->can_retry = false;
         /* all servers have been tried and none
          * was found good, go offline */
-        tevent_req_error(req, EIO);
+        tevent_req_error(req, ERR_SERVER_FAILURE);
         return;
     }
 
@@ -2430,7 +2445,7 @@ static int sdap_rebind_proc(LDAP *ldap, LDAP_CONST char *url, ber_tag_t request,
     if (ldap == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE,
               "Trying LDAP rebind while not connected.\n");
-        return ERR_NETWORK_IO;
+        return LDAP_LOCAL_ERROR;
     }
 
     if (p->use_start_tls) {

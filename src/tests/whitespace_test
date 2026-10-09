@@ -45,10 +45,11 @@ fi
 declare found_file=false
 while read file; do
     [[ $file == "src/config/testconfigs/noparse.api.conf" ]] && continue
+    [[ $(basename "$file") == umockdev.script* ]] && continue
     test `tail -c 1 $ABS_TOP_SRCDIR/$file` && \
         echo "Missing new line at the eof: $file" && \
         found_file=true
-done < <(git ls-files)
+done < <(git -C "$GIT_WORK_TREE" ls-files)
 
 if $found_file; then
     exit 1

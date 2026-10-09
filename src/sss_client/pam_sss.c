@@ -39,14 +39,75 @@
 
 #ifdef HAVE_GDM_PAM_EXTENSIONS
 #include <gdm/gdm-pam-extensions.h>
+
+#ifndef GDM_PAM_EXTENSION_CHOICE_LIST_RESPONSE_FREE
+#define GDM_PAM_EXTENSION_CHOICE_LIST_RESPONSE_FREE(response) \
+{ \
+        if ((response) != NULL) { \
+                if ((response)->key != NULL) { \
+                        sss_erase_mem_securely ((response)->key, strlen ((response)->key)); \
+                        free ((response)->key); \
+                } \
+                free (response); \
+        } \
+}
 #endif
+#endif /* HAVE_GDM_PAM_EXTENSIONS */
 
 #ifdef HAVE_GDM_CUSTOM_JSON_PAM_EXTENSION
 #include <gdm/gdm-custom-json-pam-extension.h>
+
+#ifndef GDM_PAM_EXTENSION_CUSTOM_JSON_RESPONSE_FREE
+#define GDM_PAM_EXTENSION_CUSTOM_JSON_RESPONSE_FREE(response) \
+{ \
+        if ((response) != NULL) { \
+                if ((response)->json != NULL) { \
+                        sss_erase_mem_securely ((response)->json, strlen ((response)->json)); \
+                        free ((response)->json); \
+                } \
+                free (response); \
+        } \
+}
 #endif
+#endif /* HAVE_GDM_CUSTOM_JSON_PAM_EXTENSION */
+
+/* GDM 51 replaced the uppercase function-like macros of its PAM extension
+ * headers with lowercase static inline functions. Provide the old macro
+ * names as aliases so the code below keeps compiling with both old and new
+ * gdm-pam-extensions. */
+#ifdef HAVE_GDM_PAM_EXTENSIONS
+#ifndef GDM_PAM_EXTENSION_SUPPORTED
+#define GDM_PAM_EXTENSION_SUPPORTED(name) \
+    gdm_pam_extension_supported(name)
+#endif
+#ifndef GDM_PAM_EXTENSION_MESSAGE_TO_BINARY_PROMPT_MESSAGE
+#define GDM_PAM_EXTENSION_MESSAGE_TO_BINARY_PROMPT_MESSAGE(extended_message, binary_message) \
+    gdm_pam_extension_message_to_binary_prompt_message((GdmPamExtensionMessage *)(extended_message), binary_message)
+#endif
+#ifndef GDM_PAM_EXTENSION_CHOICE_LIST_REQUEST_INIT
+#define GDM_PAM_EXTENSION_CHOICE_LIST_REQUEST_INIT(request, title, num_items) \
+    gdm_pam_extension_choice_list_request_init(request, title, num_items)
+#endif
+#ifndef GDM_PAM_EXTENSION_REPLY_TO_CHOICE_LIST_RESPONSE
+#define GDM_PAM_EXTENSION_REPLY_TO_CHOICE_LIST_RESPONSE(reply) \
+    gdm_pam_extension_reply_to_choice_list_response(reply)
+#endif
+#endif /* HAVE_GDM_PAM_EXTENSIONS */
+
+#ifdef HAVE_GDM_CUSTOM_JSON_PAM_EXTENSION
+#ifndef GDM_PAM_EXTENSION_CUSTOM_JSON_REQUEST_INIT
+#define GDM_PAM_EXTENSION_CUSTOM_JSON_REQUEST_INIT(request, proto_name, proto_version, json_str) \
+    gdm_pam_extension_custom_json_request_init(request, proto_name, proto_version, json_str)
+#endif
+#ifndef GDM_PAM_EXTENSION_REPLY_TO_CUSTOM_JSON_RESPONSE
+#define GDM_PAM_EXTENSION_REPLY_TO_CUSTOM_JSON_RESPONSE(reply) \
+    gdm_pam_extension_reply_to_custom_json_response(reply)
+#endif
+#endif /* HAVE_GDM_CUSTOM_JSON_PAM_EXTENSION */
 
 #include "sss_pam_compat.h"
 #include "sss_pam_macros.h"
+#include "util/client_envs.h"
 
 #include "sss_cli.h"
 #include "pam_message.h"
@@ -138,6 +199,7 @@ struct cert_auth_info {
     char *module_name;
     char *key_id;
     char *label;
+    bool has_protected_authentication_path;
     char *prompt_str;
     char *pam_cert_user;
     char *choice_list_id;
@@ -225,6 +287,9 @@ static void overwrite_and_free_pam_items(struct pam_items *pi)
 
     pc_list_free(pi->pc);
     pi->pc = NULL;
+
+    free(pi->client_envs);
+    pi->client_envs = NULL;
 }
 
 static int null_strcmp(const char *s1, const char *s2) {
@@ -343,6 +408,17 @@ static int do_pam_conversation(pam_handle_t *pamh, const int msg_style,
                         goto failed;
                     }
                 }
+            }
+            free(resp);
+            resp = NULL;
+        }
+
+        if (resp != NULL) {
+            if (resp[0].resp != NULL) {
+                /* We do not know what might be the content, better be on the
+                 * safe side and clean the memory. */
+                sss_erase_mem_securely((void *)resp[0].resp, strlen(resp[0].resp));
+                free(resp[0].resp);
             }
             free(resp);
             resp = NULL;
@@ -1041,10 +1117,28 @@ static int parse_cert_info(struct pam_items *pi, uint8_t *buf, size_t len,
         *pam_cert_user = cai->pam_cert_user;
     }
 
+    offset += strlen(cai->pam_cert_user) + 1;
+    if (offset >= len) {
+        D(("Cert message size mismatch"));
+        ret = EINVAL;
+        goto done;
+    }
+
+    if (strcmp((char *) &buf[*p + offset], "true") == 0) {
+        cai->has_protected_authentication_path = true;
+    } else if (strcmp((char *) &buf[*p + offset], "false") == 0) {
+        cai->has_protected_authentication_path = false;
+    } else {
+        D(("Expected 'true' or 'false'"));
+        ret = EINVAL;
+        goto done;
+    }
+
     D(("cert user: [%s] token name: [%s] module: [%s] key id: [%s] "
-       "prompt: [%s] pam cert user: [%s]",
+       "prompt: [%s] pam cert user: [%s] protected auth path: [%s]",
        cai->cert_user, cai->token_name, cai->module_name,
-       cai->key_id, cai->prompt_str, cai->pam_cert_user));
+       cai->key_id, cai->prompt_str, cai->pam_cert_user,
+       cai->has_protected_authentication_path ? "true" : "false"));
 
     DLIST_ADD(pi->cert_list, cai);
     ret = 0;
@@ -1397,6 +1491,71 @@ bool is_string_empty_or_whitespace(const char *str)
     return true;
 }
 
+static int collect_client_envs(pam_handle_t *pamh, struct pam_items *pi)
+{
+    const size_t n_envs = get_allowed_client_envs_count();
+    char *found_envs[n_envs];
+    uint8_t *client_envs;
+    uint8_t *p;
+    size_t total_size;
+    int ret;
+
+    pi->client_envs = NULL;
+    pi->client_envs_size = 0;
+
+    /* Initialize all elements to NULL (0) */
+    memset(found_envs, 0, sizeof(found_envs));
+
+    total_size = 0;
+    for (size_t i = 0; i < n_envs; i++) {
+        const char *env = allowed_client_envs[i];
+        const char *val = getenv(env);
+
+        if (val != NULL) {
+            char *found = NULL;
+
+            if (asprintf(&found, "%s=%s", env, val) == -1) {
+                D(("asprintf failed."));
+                ret = PAM_BUF_ERR;
+                goto done;
+            }
+            total_size += strlen(found) + 1;
+            found_envs[i] = found;
+        }
+    }
+
+    if (total_size == 0) {
+        ret = PAM_SUCCESS;
+        goto done;
+    }
+
+    client_envs = malloc(total_size);
+    if (client_envs == NULL) {
+        D(("malloc failed."));
+        ret = PAM_BUF_ERR;
+        goto done;
+    }
+    p = client_envs;
+    for (size_t i = 0; i < n_envs; i++) {
+        if (found_envs[i] != NULL) {
+            size_t len = strlen(found_envs[i]) + 1;
+            memcpy(p, found_envs[i], len);
+            p += len;
+        }
+    }
+
+    pi->client_envs_size = total_size;
+    pi->client_envs = client_envs;
+
+    ret = PAM_SUCCESS;
+
+done:
+    for (size_t i = 0; i < n_envs; i++) {
+        free(found_envs[i]);
+    }
+    return ret;
+}
+
 static int get_pam_items(pam_handle_t *pamh, uint32_t flags,
                          struct pam_items *pi)
 {
@@ -1487,6 +1646,9 @@ static int get_pam_items(pam_handle_t *pamh, uint32_t flags,
     pi->json_auth_msg_size = strlen(pi->json_auth_msg) + 1;
     if (pi->json_auth_selected == NULL) pi->json_auth_selected = "";
     pi->json_auth_selected_size = strlen(pi->json_auth_selected) + 1;
+
+    ret = collect_client_envs(pamh, pi);
+    if (ret != PAM_SUCCESS) return ret;
 
     return PAM_SUCCESS;
 }
@@ -2077,8 +2239,9 @@ static int auth_selection_conversation_gdm(pam_handle_t *pamh,
 
     GDM_PAM_EXTENSION_CUSTOM_JSON_REQUEST_INIT(request, "auth-mechanisms", 1,
                                                pi->json_auth_msg);
-    GDM_PAM_EXTENSION_MESSAGE_TO_BINARY_PROMPT_MESSAGE(request,
-                                                       &prompt_message);
+    GDM_PAM_EXTENSION_MESSAGE_TO_BINARY_PROMPT_MESSAGE(
+                                        (GdmPamExtensionMessage *)request,
+                                        &prompt_message);
     prompt_messages[0] = &prompt_message;
 
     ret = conv->conv(1, prompt_messages, &reply, conv->appdata_ptr);
@@ -2102,7 +2265,8 @@ done:
     if (request != NULL) {
         free(request);
     }
-    free(response);
+    GDM_PAM_EXTENSION_CUSTOM_JSON_RESPONSE_FREE(response);
+    free(reply);
 
     return ret;
 #else
@@ -2110,7 +2274,8 @@ done:
 #endif /* HAVE_GDM_CUSTOM_JSON_PAM_EXTENSION */
 }
 
-#define SC_PROMPT_FMT "PIN for %s: "
+#define SC_PROMPT_FMT "PIN for"
+#define SC_KEYPAD_FMT "Use external keypad to enter PIN for"
 
 #ifndef discard_const
 #define discard_const(ptr) ((void *)((uintptr_t)(ptr)))
@@ -2179,8 +2344,9 @@ static int prompt_multi_cert_gdm(pam_handle_t *pamh, struct pam_items *pi)
         request->list.items[c++].text = prompt;
     }
 
-    GDM_PAM_EXTENSION_MESSAGE_TO_BINARY_PROMPT_MESSAGE(request,
-                                                       &prompt_message);
+    GDM_PAM_EXTENSION_MESSAGE_TO_BINARY_PROMPT_MESSAGE(
+                                        (GdmPamExtensionMessage *)request,
+                                        &prompt_message);
     prompt_messages[0] = &prompt_message;
 
     ret = conv->conv(1, prompt_messages, &reply, conv->appdata_ptr);
@@ -2211,7 +2377,8 @@ done:
         }
         free(request);
     }
-    free(response);
+    GDM_PAM_EXTENSION_CHOICE_LIST_RESPONSE_FREE(response);
+    free(reply);
 
     return ret;
 #else
@@ -2302,7 +2469,10 @@ static int prompt_multi_cert(pam_handle_t *pamh, struct pam_items *pi)
 
 #define SC_INSERT_PROMPT _("Please (re)insert (different) Smartcard")
 
-static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
+static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi,
+                         const char *sc_pin_prompt,
+                         const char *sc_keypad_prompt,
+                         enum prompt_user_name_hint user_name_hint)
 {
     int ret;
     char *answer = NULL;
@@ -2313,6 +2483,7 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
     struct pam_message m[2] = { { 0 }, { 0 } };
     struct pam_response *resp = NULL;
     struct cert_auth_info *cai = pi->selected_cert;
+    bool has_protected_authentication_path = false;
 
     if (cai == NULL && (SERVICE_IS_GDM_SMARTCARD(pi)
                             || (pi->flags & PAM_CLI_FLAGS_REQUIRE_CERT_AUTH))) {
@@ -2321,7 +2492,18 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
                     || *cai->token_name == '\0') {
         return PAM_SYSTEM_ERR;
     } else {
-        ret = asprintf(&prompt, SC_PROMPT_FMT, cai->token_name);
+        if (cai->has_protected_authentication_path) {
+            ret = asprintf(&prompt, "%s %s",
+                           sc_keypad_prompt == NULL ? SC_KEYPAD_FMT
+                                                    : sc_keypad_prompt,
+                           cai->token_name);
+        } else {
+            ret = asprintf(&prompt, "%s %s: ",
+                           sc_pin_prompt == NULL ? SC_PROMPT_FMT
+                                                 : sc_pin_prompt,
+                           cai->token_name);
+        }
+        has_protected_authentication_path = cai->has_protected_authentication_path;
     }
 
     if (ret == -1) {
@@ -2336,7 +2518,11 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
         }
     }
 
-    if (pi->user_name_hint) {
+    /* pi->user_name_hint is the server-side setting while user_name_hint
+     * correspond to the local prompting configuration in sssd.conf. The local
+     * setting will overwrite the server-side setting. */
+    if ((pi->user_name_hint && user_name_hint == USER_NAME_HINT_NOT_SET)
+            || user_name_hint == USER_NAME_HINT_TRUE) {
         ret = pam_get_item(pamh, PAM_CONV, (const void **)&conv);
         if (ret != PAM_SUCCESS) {
             free(prompt);
@@ -2348,7 +2534,8 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
             return PAM_SYSTEM_ERR;
         }
 
-        m[0].msg_style = PAM_PROMPT_ECHO_OFF;
+        m[0].msg_style = has_protected_authentication_path ? PAM_TEXT_INFO
+                                                           : PAM_PROMPT_ECHO_OFF;
         m[0].msg = prompt;
         m[1].msg_style = PAM_PROMPT_ECHO_ON;
         m[1].msg = "User name hint: ";
@@ -2375,20 +2562,24 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
             return PAM_SYSTEM_ERR;
         }
 
-        if (resp[0].resp == NULL || *(resp[0].resp) == '\0') {
-            D(("Missing PIN."));
-            ret = PAM_CRED_INSUFFICIENT;
-            goto done;
-        }
+        if (has_protected_authentication_path) {
+            answer = NULL;
+        } else {
+            if (resp[0].resp == NULL || *(resp[0].resp) == '\0') {
+                D(("Missing PIN."));
+                ret = PAM_CRED_INSUFFICIENT;
+                goto done;
+            }
 
-        answer = strndup(resp[0].resp, MAX_AUTHTOK_SIZE);
-        sss_erase_mem_securely((void *)resp[0].resp, strlen(resp[0].resp));
-        free(resp[0].resp);
-        resp[0].resp = NULL;
-        if (answer == NULL) {
-            D(("strndup failed"));
-            ret = PAM_BUF_ERR;
-            goto done;
+            answer = strndup(resp[0].resp, MAX_AUTHTOK_SIZE);
+            sss_erase_mem_securely((void *)resp[0].resp, strlen(resp[0].resp));
+            free(resp[0].resp);
+            resp[0].resp = NULL;
+            if (answer == NULL) {
+                D(("strndup failed"));
+                ret = PAM_BUF_ERR;
+                goto done;
+            }
         }
 
         if (resp[1].resp != NULL && *(resp[1].resp) != '\0') {
@@ -2411,8 +2602,10 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
             pi->pam_user_size = strlen(pi->pam_user) + 1;
         }
     } else {
-        ret = do_pam_conversation(pamh, PAM_PROMPT_ECHO_OFF, prompt, NULL,
-                                  &answer);
+        ret = do_pam_conversation(pamh,
+                                  has_protected_authentication_path ? PAM_TEXT_INFO
+                                                                    : PAM_PROMPT_ECHO_OFF,
+                                  prompt, NULL, &answer);
         free(prompt);
         if (ret != PAM_SUCCESS) {
             D(("do_pam_conversation failed."));
@@ -2428,7 +2621,8 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
         goto done;
     }
 
-    if (answer == NULL || *answer == '\0') {
+    if (!has_protected_authentication_path
+            && (answer == NULL || *answer == '\0')) {
         D(("Missing PIN."));
         ret = PAM_CRED_INSUFFICIENT;
         goto done;
@@ -2465,7 +2659,9 @@ static int prompt_sc_pin(pam_handle_t *pamh, struct pam_items *pi)
             goto done;
         }
 
-        pi->pam_authtok_type = SSS_AUTHTOK_TYPE_SC_PIN;
+        pi->pam_authtok_type = has_protected_authentication_path
+                                                    ? SSS_AUTHTOK_TYPE_SC_KEYPAD
+                                                    : SSS_AUTHTOK_TYPE_SC_PIN;
         pi->pam_authtok_size = needed_size;
     }
 
@@ -2635,7 +2831,21 @@ static int prompt_by_config(pam_handle_t *pamh, struct pam_items *pi)
                                 pc_get_oauth2_inter_prompt(pi->pc[c]));
             break;
         case PC_TYPE_SMARTCARD:
-            ret = prompt_sc_pin(pamh, pi);
+            if (pi->cert_list->next == NULL) {
+                /* Only one certificate */
+                pi->selected_cert = pi->cert_list;
+            } else {
+                ret = prompt_multi_cert(pamh, pi);
+                if (ret != 0) {
+                    D(("Failed to select certificate"));
+                    return PAM_AUTHTOK_ERR;
+                }
+            }
+
+            ret = prompt_sc_pin(pamh, pi,
+                                pc_get_smartcard_pin_prompt(pi->pc[c]),
+                                pc_get_smartcard_keypad_prompt(pi->pc[c]),
+                                pc_get_smartcard_user_name_hint_prompt(pi->pc[c]));
             /* Todo: add extra string option */
             break;
         default:
@@ -2689,11 +2899,13 @@ static int get_authtok_for_authentication(pam_handle_t *pamh,
                         return PAM_AUTHTOK_ERR;
                     }
                 }
-                ret = prompt_sc_pin(pamh, pi);
+                ret = prompt_sc_pin(pamh, pi, NULL, NULL,
+                                    USER_NAME_HINT_NOT_SET);
             } else if (SERVICE_IS_GDM_SMARTCARD(pi)
                     || (pi->flags & PAM_CLI_FLAGS_REQUIRE_CERT_AUTH)) {
                /* Use pin prompt as fallback for gdm-smartcard */
-                ret = prompt_sc_pin(pamh, pi);
+                ret = prompt_sc_pin(pamh, pi, NULL, NULL,
+                                    USER_NAME_HINT_NOT_SET);
             } else if (flags & PAM_CLI_FLAGS_USE_2FA
                     || (pi->otp_vendor != NULL && pi->otp_token_id != NULL
                             && pi->otp_challenge != NULL)) {

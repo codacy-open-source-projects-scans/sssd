@@ -1018,7 +1018,7 @@ static errno_t passkey_child_exec(struct tevent_req *req)
     state->child_status = ETIMEDOUT;
 
     ret = sss_child_start(state, state->ev,
-                          PASSKEY_CHILD_PATH, state->extra_args, false,
+                          PASSKEY_CHILD_PATH, state->extra_args, false, NULL,
                           state->logfile, STDOUT_FILENO,
                           (state->kerberos_pa) ? NULL : pam_passkey_auth_done, req,
                           state->timeout,
@@ -1181,7 +1181,8 @@ errno_t save_passkey_data(TALLOC_CTX *mem_ctx,
      * takes care of automatically removing it from the hash table then */
     pctx->pk_table_data = talloc_zero(tmp_ctx, struct pam_passkey_table_data);
     if (pctx->pk_table_data == NULL) {
-        return ENOMEM;
+        ret = ENOMEM;
+        goto done;
     }
 
     if (pctx->pk_table_data->table == NULL) {

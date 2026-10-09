@@ -843,7 +843,7 @@ static void sss_ldap_debug(const char *buf)
                 "libldap: %s", buf);
 }
 
-void setup_ldap_debug(struct dp_option *basic_opts)
+static void setup_ldap_debug(struct dp_option *basic_opts)
 {
     int ret;
     int ldap_debug_level;
@@ -875,7 +875,7 @@ void setup_ldap_debug(struct dp_option *basic_opts)
     }
 }
 
-errno_t setup_tls_config(struct dp_option *basic_opts)
+static errno_t setup_tls_config(struct dp_option *basic_opts)
 {
     int ret;
     int ldap_opt_x_tls_require_cert;
@@ -969,6 +969,31 @@ errno_t setup_tls_config(struct dp_option *basic_opts)
         }
     }
 
+    return EOK;
+}
+
+errno_t sdap_setup_libldap_global_options(struct dp_option *basic_opts)
+{
+    static bool done = false;
+    errno_t ret;
+
+    if (done) {
+        return EOK;
+    }
+
+    if (basic_opts == NULL) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "'basic_opts' are NULL\n");
+        return EINVAL;
+    }
+
+    setup_ldap_debug(basic_opts);
+
+    ret = setup_tls_config(basic_opts);
+    if (ret != EOK) {
+        return ret;
+    }
+
+    done = true;
     return EOK;
 }
 
@@ -1263,7 +1288,7 @@ errno_t sdap_set_config_options_with_rootdse(struct sysdb_attrs *rootdse,
     if (!sdom->naming_context) {
         sdom->naming_context = get_naming_context(sdom, rootdse);
         if (sdom->naming_context == NULL) {
-            DEBUG(SSSDBG_CRIT_FAILURE, "get_naming_context failed.\n");
+            DEBUG(SSSDBG_MINOR_FAILURE, "get_naming_context failed.\n");
 
             /* This has to be non-fatal, since some servers offer
              * multiple namingContexts entries. We will just
@@ -1316,10 +1341,48 @@ errno_t sdap_set_config_options_with_rootdse(struct sysdb_attrs *rootdse,
 
     /* Sudo */
     if (!sdom->sudo_search_bases) {
-       ret = sdap_set_search_base(opts, sdom,
-                                   SDAP_SUDO_SEARCH_BASE,
-                                   sdom->naming_context);
-        if (ret != EOK) goto done;
+        if (dp_opt_get_string(opts->basic, SDAP_SUDO_SEARCH_BASE) != NULL) {
+            /* The option string can be set while sdom->sudo_search_bases
+             * is still NULL when a provider sets SDAP_SUDO_SEARCH_BASE
+             * but parses it into its own context rather than into sdom.
+             * E.g. IPA sets it to "cn=sudo,<basedn>" in
+             * ipa_sudo_choose_schema() and parses it into sudo_ctx->sudo_sb
+             * in ipa_sudo_init_ipa_schema(), bypassing sdom entirely.
+             * In this case just parse the already-set option into sdom. */
+            ret = sdap_parse_search_base(opts,
+                                         sysdb_ctx_get_ldb(sdom->dom->sysdb),
+                                         opts->basic, SDAP_SUDO_SEARCH_BASE,
+                                         &sdom->sudo_search_bases);
+            if (ret != EOK) goto done;
+        } else {
+            if (opts->dp == NULL || dp_target_module(opts->dp, DPT_SUDO) != NULL) {
+                /*
+                 * Emit security warnings only if sudo_provider not explicitly
+                 * disabled (= none). At some point make this option mandatory,
+                 * i.e. disable sudo rules lookup if 'sudo_search_bases' not set.
+                 */
+                DEBUG(SSSDBG_IMPORTANT_INFO,
+                      "`ldap_sudo_search_base` is not set. SSSD will search the "
+                      "entire directory tree (%s) for sudoRole objects. This may "
+                      "allow any LDAP principal with write access to any subtree "
+                      "to inject sudo rules granting arbitrary privileges. Set "
+                      "`ldap_sudo_search_base` to restrict the search scope "
+                      "(e.g., 'ou=sudoers,dc=example,dc=com').\n",
+                      sdom->naming_context);
+                sss_log(SSS_LOG_ALERT,
+                        "`ldap_sudo_search_base` is not set. SSSD will search the "
+                        "entire directory tree (%s) for sudoRole objects. This may "
+                        "allow any LDAP principal with write access to any subtree "
+                        "to inject sudo rules granting arbitrary privileges. Set "
+                        "`ldap_sudo_search_base` to restrict the search scope "
+                        "(e.g., 'ou=sudoers,dc=example,dc=com').",
+                        sdom->naming_context);
+            }
+            ret = sdap_set_search_base(opts, sdom,
+                                       SDAP_SUDO_SEARCH_BASE,
+                                       sdom->naming_context);
+            if (ret != EOK) goto done;
+        }
     }
 
     /* Services */

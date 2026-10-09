@@ -47,6 +47,9 @@
 #define CONFDB_DEFAULT_CONFIG_DIR SSSD_CONF_DIR"/"CONFDB_DEFAULT_CONFIG_DIR_NAME
 #define SSSD_MIN_ID 1
 #define CONFDB_DEFAULT_SHELL_FALLBACK "/bin/sh"
+#if defined(USE_VENDORDIR)
+#define SSSD_VENDOR_CONFIG_FILE SSSD_VENDOR_DIR"/"SSSD_CONFIG_FILE_NAME
+#endif
 
 /* Configuration options */
 
@@ -243,7 +246,6 @@
 #define CONFDB_DOMAIN_AUTOFS_CACHE_TIMEOUT "entry_cache_autofs_timeout"
 #define CONFDB_DOMAIN_SUDO_CACHE_TIMEOUT "entry_cache_sudo_timeout"
 #define CONFDB_DOMAIN_SSH_HOST_CACHE_TIMEOUT "entry_cache_ssh_host_timeout"
-#define CONFDB_DOMAIN_COMPUTER_CACHE_TIMEOUT "entry_cache_computer_timeout"
 #define CONFDB_DOMAIN_RESOLVER_CACHE_TIMEOUT "entry_cache_resolver_timeout"
 #define CONFDB_DOMAIN_PWD_EXPIRATION_WARNING "pwd_expiration_warning"
 #define CONFDB_DOMAIN_REFRESH_EXPIRED_INTERVAL "refresh_expired_interval"
@@ -303,6 +305,9 @@
 #define CONFDB_PC_2FA_1ST_PROMPT "first_prompt"
 #define CONFDB_PC_2FA_2ND_PROMPT "second_prompt"
 #define CONFDB_PC_TYPE_CERT_AUTH "cert_auth"
+#define CONFDB_PC_CERT_AUTH_PIN_PROMPT "pin_prompt"
+#define CONFDB_PC_CERT_AUTH_KEYPAD_PROMPT "keypad_prompt"
+#define CONFDB_PC_CERT_AUTH_USERNAME_HINT "user_name_hint"
 #define CONFDB_PC_TYPE_PASSKEY "passkey"
 #define CONFDB_PC_PASSKEY_INTERACTIVE "interactive"
 #define CONFDB_PC_PASSKEY_INTERACTIVE_PROMPT "interactive_prompt"
@@ -391,7 +396,6 @@ struct sss_domain_info {
     uint32_t autofsmap_timeout;
     uint32_t sudo_timeout;
     uint32_t ssh_host_timeout;
-    uint32_t computer_timeout;
     uint32_t resolver_timeout;
 
     uint32_t refresh_expired_interval;

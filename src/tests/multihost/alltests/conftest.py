@@ -134,7 +134,7 @@ def setup_authselect(session_multihost):
 @pytest.fixture(scope='function')
 def ldap_posix_usergroup(session_multihost, request):
     """ Create single ldap posix user group """
-    ldap_uri = f'ldap://{session_multihost.master[0].sys_hostname}'
+    ldap_uri = f'ldap://{session_multihost.master[0].ip}'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
     krb = krb5srv(session_multihost.master[0], 'EXAMPLE.TEST')
     id = random.randint(9, 99)
@@ -172,10 +172,8 @@ def localusers(session_multihost, request):
     for key, value in users.items():
         useradd = 'useradd -u %s %s' % (value, key)
         session_multihost.client[0].run_command(useradd, raiseonerr=False)
-        passwd = 'passwd --stdin %s' % (key)
-        session_multihost.client[0].run_command(passwd,
-                                                stdin_text='Secret123',
-                                                raiseonerr=False)
+        set_passwd = f'echo "{key}:Secret123" | chpasswd'
+        session_multihost.client[0].run_command(set_passwd, raiseonerr=False)
 
     def delusers():
         """ Delete local users """
@@ -189,7 +187,7 @@ def localusers(session_multihost, request):
 @pytest.fixture(scope='function')
 def create_350_posix_users(session_multihost, request):
     """ Create posix user and groups """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -257,7 +255,7 @@ def backupsssdconf(session_multihost, request):
 @pytest.fixture(scope='function')
 def delete_groups_users(session_multihost, request):
     """Fixture for bz1817122"""
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -286,7 +284,7 @@ def delete_groups_users(session_multihost, request):
 @pytest.fixture(scope="function")
 def set_dslimits(session_multihost, request):
     """ Modify nsslapd-sizelimit """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -325,7 +323,7 @@ def add_nisobject(session_multihost, request):
         session_multihost.master[0].run_command(start_nfs)
     except subprocess.CalledProcessError:
         pytest.fail("Unable to start nfs server")
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ds_suffix = 'dc=example,dc=test'
@@ -371,7 +369,7 @@ def indirect_nismaps(session_multihost, request, create_etc_exports):
     nfs_server = session_multihost.master[0].external_hostname
     client_ip = session_multihost.client[0].ip
     server = sssdTools(session_multihost.master[0])
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -439,7 +437,7 @@ def set_autofs_search_base(session_multihost, request):
 def set_ldap_uri(session_multihost, request):
     """ Replace ldaps uri with ldap uri """
     tools = sssdTools(session_multihost.client[0])
-    ldap_uri = 'ldap://%s' % session_multihost.master[0].sys_hostname
+    ldap_uri = 'ldap://%s' % session_multihost.master[0].ip
     ldap_params = {'ldap_uri': ldap_uri}
     tools.sssd_conf('domain/%s' % (ds_instance_name), ldap_params)
     session_multihost.client[0].service_sssd('restart')
@@ -456,7 +454,7 @@ def set_ldap_uri(session_multihost, request):
 @pytest.fixture(scope="function")
 def create_ssh_keys(session_multihost, request):
     """ Create ssh keys """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -533,7 +531,7 @@ def sssd_sudo_conf(session_multihost, request):
 @pytest.fixture(scope='function')
 def sudo_rule(session_multihost, request):
     """ Create sudoers ldap entries """
-    ldap_uri = f'ldap://{session_multihost.master[0].sys_hostname}'
+    ldap_uri = f'ldap://{session_multihost.master[0].ip}'
     sudo_ou = f'ou=sudoers,{ds_suffix}'
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
@@ -577,7 +575,7 @@ testdata = [
 @pytest.fixture(ids=["sudoNotBefore", "sudoNotAfter"], params=testdata)
 def timed_sudoers(session_multihost, request):
     """ Creates a time sudoers ldap entries """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     sudo_ou = 'ou=sudoers, %s' % ds_suffix
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
@@ -668,37 +666,6 @@ def multipleds(session_multihost, request):
 
 
 @pytest.fixture(scope='class')
-def multipleds_failover(session_multihost, request):
-    """ Setup Multiple Directory Servers for failover"""
-    server_list = [session_multihost.master[0].sys_hostname,
-                   session_multihost.master[1].sys_hostname]
-    pki_inst = PkiTools()
-    try:
-        certdb = pki_inst.createselfsignedcerts(server_list)
-    except PkiLibException:
-        pytest.fail("Failed to create CA")
-    print(certdb)
-    dsobjlist = []
-    for idx in range(2):
-        host = session_multihost.master[idx]
-        dsobj = DirSrvWrap(host,
-                           client_obj=session_multihost.client[0],
-                           ssl=True,
-                           ssldb=certdb)
-        dsobjlist.append(dsobj)
-        inst_name = 'example'
-        suffix = 'dc=example,dc=test'
-        dsobj.create_ds_instance(inst_name, suffix)
-
-    def removeds():
-        """ Remove DS Instances """
-        for dsinst in dsobjlist:
-            instname = 'example'
-            dsinst.remove_ds_instance(instname)
-    request.addfinalizer(removeds)
-
-
-@pytest.fixture(scope='class')
 # pylint: disable=unused-argument
 def posix_users_multidomain(session_multihost, multipleds):
     """ Create posix users groups for multidomain """
@@ -706,7 +673,7 @@ def posix_users_multidomain(session_multihost, multipleds):
     id_suffix = ['20', '30']
     for idx in range(2):
         host = session_multihost.master[idx]
-        ldap_uri = 'ldap://%s' % (host.sys_hostname)
+        ldap_uri = 'ldap://%s' % (host.ip)
         ds_rootdn = 'cn=Directory Manager'
         ds_rootpw = 'Secret123'
         ds_suffix = 'dc=example%d,dc=test' % idx
@@ -976,7 +943,7 @@ def setup_sssd_gssapi(session_multihost, setup_sssd,
     tools = sssdTools(session_multihost.client[0])
     domain_section = 'domain/%s' % ds_instance_name
     krb5_server = session_multihost.master[0].sys_hostname
-    ldap_uri = 'ldap://%s' % (krb5_server)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -992,39 +959,6 @@ def setup_sssd_gssapi(session_multihost, setup_sssd,
     ldap_inst.posix_user("ou=People", "%s" % ds_suffix, host_info)
     tools.sssd_conf(domain_section, domain_params)
     session_multihost.client[0].service_sssd('restart')
-
-
-@pytest.fixture(scope='class')
-def setup_sssd_failover(session_multihost, request):
-    """ Configure sssd.conf """
-    tools = sssdTools(session_multihost.client[0])
-    stop_sssd = 'systemctl stop sssd'
-    session_multihost.client[0].run_command(stop_sssd)
-    ds_host1 = session_multihost.master[0].sys_hostname
-    ds_host2 = session_multihost.master[1].sys_hostname
-    sssd_params = {'domains': ds_instance_name}
-    tools.sssd_conf('sssd', sssd_params)
-    domain_section = 'domain/%s' % ds_instance_name
-    ldap_uri = 'ldaps://%s, ldaps://%s' % (ds_host1, ds_host2)
-    domain_params = {'ldap_search_base': ds_suffix,
-                     'id_provider': 'ldap',
-                     'auth_provider': 'ldap',
-                     'ldap_user_home_directory': "/home/%u",
-                     'ldap_uri': ldap_uri,
-                     'ldap_tls_cacert': '/etc/openldap/cacerts/cacert.pem',
-                     'use_fully_qualified_names': 'True',
-                     'debug_level': '9'}
-    tools.sssd_conf(domain_section, domain_params)
-    start_sssd = 'systemctl restart sssd'
-    session_multihost.client[0].run_command(start_sssd)
-
-    def removesssd():
-        """ Remove sssd configuration """
-        stop_sssd = 'systemctl stop sssd'
-        session_multihost.client[0].run_command(stop_sssd)
-        removeconf = 'rm -f %s' % (SSSD_DEFAULT_CONF)
-        session_multihost.client[0].run_command(removeconf)
-    request.addfinalizer(removesssd)
 
 
 @pytest.fixture(scope="class")
@@ -1043,7 +977,7 @@ def multihost(session_multihost, request):
 @pytest.fixture(scope='class')
 def create_posix_usersgroups(session_multihost):
     """ Create posix user and groups """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1075,43 +1009,9 @@ def create_posix_usersgroups(session_multihost):
 
 
 @pytest.fixture(scope='class')
-def create_posix_usersgroups_failover(session_multihost):
-    """ Create posix user and groups """
-    for idx in range(2):
-        ldap_uri = 'ldap://%s' % (session_multihost.master[idx].sys_hostname)
-        ds_rootdn = 'cn=Directory Manager'
-        ds_rootpw = 'Secret123'
-        ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
-        for i in range(10):
-            user_info = {'cn': 'foo%d' % i,
-                         'uid': 'foo%d' % i,
-                         'uidNumber': '1458310%d' % i,
-                         'gidNumber': '14564100'}
-            ldap_inst.posix_user("ou=People", "dc=example,dc=test", user_info)
-
-        memberdn = 'uid=%s,ou=People,dc=example,dc=test' % ('foo0')
-        group_info = {'cn': 'ldapusers',
-                      'gidNumber': '14564100',
-                      'uniqueMember': memberdn}
-        try:
-            ldap_inst.posix_group("ou=Groups", "dc=example,dc=test",
-                                  group_info)
-        except LdapException:
-            assert False
-
-        group_dn = 'cn=ldapusers,ou=Groups,dc=example,dc=test'
-        for i in range(1, 10):
-            user_dn = 'uid=foo%d,ou=People,dc=example,dc=test' % i
-            add_member = [(ldap.MOD_ADD, 'uniqueMember',
-                           user_dn.encode('utf-8'))]
-            (ret, _) = ldap_inst.modify_ldap(group_dn, add_member)
-            assert ret == 'Success'
-
-
-@pytest.fixture(scope='class')
 def create_posix_usersgroups_autoprivategroups(session_multihost):
     """ Create posix user and groups for autoprivategroup fixture"""
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1167,7 +1067,7 @@ def create_posix_usersgroups_autoprivategroups(session_multihost):
 @pytest.fixture(scope='class')
 def netgroups(session_multihost):
     """ Create netgroup users """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1211,7 +1111,7 @@ def enable_autofs_schema(session_multihost, request):
     :param obj session_multihost: multihost object
     :param obj request: pytest request object
     """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1311,7 +1211,7 @@ def create_host_user(session_multihost):
     """ Add host user for SASL with GSSAPI authentication
     :param obj session_multihost: multihost object
     """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1331,7 +1231,7 @@ def create_host_user(session_multihost):
 @pytest.fixture(scope='class')
 def enable_password_check_syntax(session_multihost, request):
     """ Enable passwordCheckSyntax """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_obj = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1448,7 +1348,7 @@ def add_host_entry(session_multihost, request):
     Add host and network entries in Directory server to be used
     by sssd hostmap feature.
     """
-    ldap_uri = 'ldap://%s' % (session_multihost.master[0].sys_hostname)
+    ldap_uri = 'ldap://%s' % (session_multihost.master[0].ip)
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1513,7 +1413,7 @@ def ns_account_lock(session_multihost, request):
     session_multihost.client[0].service_sssd('restart')
     # Add managed role
     master_e = session_multihost.master[0].ip
-    ldap_uri = f'ldap://{master_e}'
+    ldap_uri = f'ldaps://{master_e}'
     ds_rootdn = 'cn=Directory Manager'
     ds_rootpw = 'Secret123'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
@@ -1548,7 +1448,7 @@ def ns_account_lock(session_multihost, request):
     def restoresssdconf():
         """ Restore sssd.conf """
         master_e = session_multihost.master[0].ip
-        ldap_uri = f'ldap://{master_e}'
+        ldap_uri = f'ldaps://{master_e}'
         ds_rootdn = 'cn=Directory Manager'
         ds_rootpw = 'Secret123'
         ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)

@@ -2135,7 +2135,6 @@ ad_gpo_connect_done(struct tevent_req *subreq)
 {
     struct tevent_req *req;
     struct ad_gpo_access_state *state;
-    int dp_error;
     errno_t ret;
     char *server_uri;
     LDAPURLDesc *lud;
@@ -2145,11 +2144,11 @@ ad_gpo_connect_done(struct tevent_req *subreq)
     req = tevent_req_callback_data(subreq, struct tevent_req);
     state = tevent_req_data(req, struct ad_gpo_access_state);
 
-    ret = sdap_id_op_connect_recv(subreq, &dp_error);
+    ret = sdap_id_op_connect_recv(subreq);
     talloc_zfree(subreq);
 
     if (ret != EOK) {
-        if (dp_error != DP_ERR_OFFLINE) {
+        if (ret != ERR_OFFLINE) {
             DEBUG(SSSDBG_OP_FAILURE,
                   "Failed to connect to AD server: [%d](%s)\n",
                   ret, sss_strerror(ret));
@@ -2282,8 +2281,6 @@ ad_gpo_target_dn_retrieval_done(struct tevent_req *subreq)
     struct tevent_req *req;
     struct ad_gpo_access_state *state;
     int ret;
-    int dp_error;
-    int sdap_ret;
     const char *target_dn = NULL;
     uint32_t uac;
     static const char *host_attrs[] = { SYSDB_ORIG_DN, SYSDB_AD_USER_ACCOUNT_CONTROL, SYSDB_SID_STR, NULL };
@@ -2293,10 +2290,10 @@ ad_gpo_target_dn_retrieval_done(struct tevent_req *subreq)
 
     req = tevent_req_callback_data(subreq, struct tevent_req);
     state = tevent_req_data(req, struct ad_gpo_access_state);
-    ret = groups_by_user_recv(subreq, &dp_error, &sdap_ret);
+    ret = groups_by_user_recv(subreq);
     talloc_zfree(subreq);
-    if (ret != EOK) {
-        if (sdap_ret == EAGAIN && dp_error == DP_ERR_OFFLINE) {
+    if (ret != EOK && ret != ENOENT) {
+        if (ret == ERR_OFFLINE) {
             DEBUG(SSSDBG_TRACE_FUNC, "Preparing for offline operation.\n");
             ret = process_offline_gpos(state,
                                        state->user,
@@ -2322,7 +2319,6 @@ ad_gpo_target_dn_retrieval_done(struct tevent_req *subreq)
         DEBUG(SSSDBG_OP_FAILURE,
               "Unable to get policy target's DN: [%d](%s)\n",
                ret, sss_strerror(ret));
-        ret = ENOENT;
         goto done;
     }
 
@@ -2482,7 +2478,6 @@ ad_gpo_process_gpo_done(struct tevent_req *subreq)
     struct tevent_req *req;
     struct ad_gpo_access_state *state;
     int ret;
-    int dp_error;
     struct gp_gpo **candidate_gpos = NULL;
     int num_candidate_gpos = 0;
     int i = 0;
@@ -2494,7 +2489,7 @@ ad_gpo_process_gpo_done(struct tevent_req *subreq)
 
     talloc_zfree(subreq);
 
-    ret = sdap_id_op_done(state->sdap_op, ret, &dp_error);
+    ret = sdap_id_op_done(state->sdap_op, ret);
 
     if (ret != EOK && ret != ENOENT) {
         DEBUG(SSSDBG_OP_FAILURE,
@@ -3368,7 +3363,6 @@ ad_gpo_site_dn_retrieval_done(struct tevent_req *subreq)
     struct tevent_req *req;
     struct ad_gpo_process_som_state *state;
     int ret;
-    int dp_error;
     int i = 0;
     size_t reply_count;
     struct sysdb_attrs **reply;
@@ -3381,7 +3375,7 @@ ad_gpo_site_dn_retrieval_done(struct tevent_req *subreq)
                                 &reply_count, &reply);
     talloc_zfree(subreq);
     if (ret != EOK) {
-        ret = sdap_id_op_done(state->sdap_op, ret, &dp_error);
+        ret = sdap_id_op_done(state->sdap_op, ret);
 
         DEBUG(SSSDBG_OP_FAILURE,
               "Unable to get configNC: [%d](%s)\n", ret, sss_strerror(ret));
@@ -3494,7 +3488,6 @@ ad_gpo_get_som_attrs_done(struct tevent_req *subreq)
     struct tevent_req *req;
     struct ad_gpo_process_som_state *state;
     int ret;
-    int dp_error;
     size_t num_results;
     struct sysdb_attrs **results;
     struct ldb_message_element *el = NULL;
@@ -3510,7 +3503,7 @@ ad_gpo_get_som_attrs_done(struct tevent_req *subreq)
     talloc_zfree(subreq);
 
     if (ret != EOK) {
-        ret = sdap_id_op_done(state->sdap_op, ret, &dp_error);
+        ret = sdap_id_op_done(state->sdap_op, ret);
 
         DEBUG(SSSDBG_OP_FAILURE,
               "Unable to get SOM attributes: [%d](%s)\n",
@@ -3833,6 +3826,43 @@ ad_gpo_populate_candidate_gpos(TALLOC_CTX *mem_ctx,
 }
 
 /*
+ * Check whether a path contains ".." as a path component.
+ * Returns true if traversal is detected, false if the path is safe.
+ *
+ * Checks for:
+ *   - "/.." anywhere in the path (component starting with ..)
+ *   - "../" at the start of the path
+ *   - exact match ".." (path is just "..")
+ *   - "/.." at the end of the path
+ *
+ * Does NOT match ".." as a substring of a longer component
+ * (e.g., "my..file" is allowed).
+ */
+static bool gpo_path_has_traversal(const char *path)
+{
+    const char *p;
+
+    if (path == NULL) {
+        return false;
+    }
+
+    /* Exact match */
+    if (strcmp(path, "..") == 0) return true;
+
+    /* Starts with ../ */
+    if (strncmp(path, "../", 3) == 0) return true;
+
+    /* Contains /../ or ends with /.. */
+    p = path;
+    while ((p = strstr(p, "/..")) != NULL) {
+        if (p[3] == '/' || p[3] == '\0') return true;
+        p += 3;
+    }
+
+    return false;
+}
+
+/*
  * This function parses the input_path into its components, replaces each
  * back slash ('\') with a forward slash ('/'), and populates the output params.
  *
@@ -3904,6 +3934,16 @@ ad_gpo_extract_smb_components(TALLOC_CTX *mem_ctx,
     }
 
     if (smb_path == NULL)  {
+        ret = EINVAL;
+        goto done;
+    }
+
+    /* Reject path traversal. See function comment for what is matched. */
+    if (gpo_path_has_traversal(smb_path)) {
+        DEBUG(SSSDBG_CRIT_FAILURE,
+              "gPCFileSysPath contains path traversal component '..': "
+              "[%s]. Rejecting to prevent cache directory escape.\n",
+              smb_path);
         ret = EINVAL;
         goto done;
     }
@@ -4217,7 +4257,6 @@ ad_gpo_get_gpo_attrs_done(struct tevent_req *subreq)
     struct tevent_req *req;
     struct ad_gpo_process_gpo_state *state;
     int ret;
-    int dp_error;
     size_t num_results, refcount;
     struct sysdb_attrs **results;
     char **refs;
@@ -4231,7 +4270,7 @@ ad_gpo_get_gpo_attrs_done(struct tevent_req *subreq)
     talloc_zfree(subreq);
 
     if (ret != EOK) {
-        ret = sdap_id_op_done(state->sdap_op, ret, &dp_error);
+        ret = sdap_id_op_done(state->sdap_op, ret);
 
         DEBUG(SSSDBG_OP_FAILURE,
               "Unable to get GPO attributes: [%d](%s)\n",
@@ -4291,7 +4330,6 @@ void
 ad_gpo_get_sd_referral_done(struct tevent_req *subreq)
 {
     errno_t ret;
-    int dp_error;
     struct sysdb_attrs *reply;
     char *smb_host;
 
@@ -4304,7 +4342,7 @@ ad_gpo_get_sd_referral_done(struct tevent_req *subreq)
     talloc_zfree(subreq);
     if (ret != EOK) {
         /* Terminate the sdap_id_op */
-        ret = sdap_id_op_done(state->sdap_op, ret, &dp_error);
+        ret = sdap_id_op_done(state->sdap_op, ret);
 
         DEBUG(SSSDBG_OP_FAILURE,
               "Unable to get referred GPO attributes: [%d](%s)\n",
@@ -4770,7 +4808,7 @@ ad_gpo_process_cse_send(TALLOC_CTX *mem_ctx,
         goto immediately;
     }
 
-    ret = sss_child_start(state, ev, GPO_CHILD, NULL, false,
+    ret = sss_child_start(state, ev, GPO_CHILD, NULL, false, NULL,
                           GPO_CHILD_LOG_FILE, AD_GPO_CHILD_OUT_FILENO,
                           /* no SIGCHLD cb */ NULL, NULL,
                           timeout,
@@ -5026,7 +5064,6 @@ static void
 ad_gpo_get_sd_referral_conn_done(struct tevent_req *subreq)
 {
     errno_t ret;
-    int dp_error;
     const char *attrs[] = AD_GPO_ATTRS;
     LDAPURLDesc *lud = NULL;
 
@@ -5035,10 +5072,10 @@ ad_gpo_get_sd_referral_conn_done(struct tevent_req *subreq)
     struct ad_gpo_get_sd_referral_state *state =
             tevent_req_data(req, struct ad_gpo_get_sd_referral_state);
 
-    ret = sdap_id_op_connect_recv(subreq, &dp_error);
+    ret = sdap_id_op_connect_recv(subreq);
     talloc_zfree(subreq);
     if (ret != EOK) {
-        if (dp_error == DP_ERR_OFFLINE) {
+        if (ret == ERR_OFFLINE) {
             DEBUG(SSSDBG_TRACE_FUNC,
                   "Backend is marked offline, retry later!\n");
             tevent_req_done(req);
@@ -5092,7 +5129,6 @@ static void
 ad_gpo_get_sd_referral_search_done(struct tevent_req *subreq)
 {
     errno_t ret;
-    int dp_error;
     size_t num_results, num_refs;
     struct sysdb_attrs **results = NULL;
     char **refs;
@@ -5106,7 +5142,7 @@ ad_gpo_get_sd_referral_search_done(struct tevent_req *subreq)
                               &num_refs, &refs);
     talloc_zfree(subreq);
     if (ret != EOK) {
-        ret = sdap_id_op_done(state->ref_op, ret, &dp_error);
+        ret = sdap_id_op_done(state->ref_op, ret);
 
         DEBUG(SSSDBG_OP_FAILURE,
               "Unable to get GPO attributes: [%d](%s)\n",

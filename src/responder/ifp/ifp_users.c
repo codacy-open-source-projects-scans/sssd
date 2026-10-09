@@ -1144,7 +1144,8 @@ ifp_users_find_by_valid_cert_send(TALLOC_CTX *mem_ctx,
     }
 
     ret = sss_child_start(state, state->ev, P11_CHILD_PATH,
-                          state->extra_args, false, state->logfile,
+                          state->extra_args, false, NULL,
+                          state->logfile,
                           -1, /* ifp cares only about exit code, so no 'io' */
                           ifp_users_find_by_valid_cert_step, req,
                           state->timeout,
@@ -1642,13 +1643,14 @@ ifp_users_user_get_groups(TALLOC_CTX *mem_ctx,
 
     ret = ifp_users_user_get(tmp_ctx, sbus_req, ifp_ctx, &domain, &user);
     if (ret != EOK) {
-        return ret;
+        goto done;
     }
 
     username = ldb_msg_find_attr_as_string(user, SYSDB_NAME, NULL);
     if (username == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE, "User name is empty!\n");
-        return ERR_INTERNAL;
+        ret = ERR_INTERNAL;
+        goto done;
     }
 
     /* Run initgroups. */

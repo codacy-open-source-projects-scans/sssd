@@ -260,11 +260,10 @@ errno_t entra_id_lookup(TALLOC_CTX *mem_ctx, enum oidc_cmd oidc_cmd,
     }
 
     if (out != NULL) {
-        *out = get_json_string_array_by_id_list(mem_ctx, rest_ctx, bearer_token,
-                                                id_list);
-        if (*out == NULL) {
+        ret = get_json_string_array_by_id_list(mem_ctx, rest_ctx, base_url,
+                                               bearer_token, id_list, out);
+        if (ret != EOK) {
             DEBUG(SSSDBG_OP_FAILURE, "Failed to get objects by ID.\n");
-            ret = EIO;
             goto done;
         }
     }
@@ -313,6 +312,7 @@ errno_t keycloak_lookup(TALLOC_CTX *mem_ctx, enum oidc_cmd oidc_cmd,
     char *input_enc;
     const char *obj_id;
     char *short_name;
+    char *short_name_enc;
     char *sep;
     struct name_and_type_identifier keycloak_name_and_type_identifier = {
                             .user_identifier_attr = "username",
@@ -339,7 +339,7 @@ errno_t keycloak_lookup(TALLOC_CTX *mem_ctx, enum oidc_cmd oidc_cmd,
     case GET_GROUP:
     case GET_GROUP_MEMBERS:
         sep = strrchr(input, '@');
-        if (sep == NULL && sep != input) {
+        if (sep == NULL || sep == input) {
             filter = talloc_asprintf(rest_ctx, "search=%s&exact=true&populateHierarchy=false&briefRepresentation=false", input_enc);
         } else {
             short_name = talloc_strndup(rest_ctx, input, sep - input);
@@ -350,8 +350,16 @@ errno_t keycloak_lookup(TALLOC_CTX *mem_ctx, enum oidc_cmd oidc_cmd,
                 filter = talloc_asprintf(rest_ctx, "search=%s&exact=true",
                                                    input_enc);
             } else {
+                short_name_enc = url_encode_string(rest_ctx, short_name);
+                if (short_name_enc == NULL) {
+                    DEBUG(SSSDBG_OP_FAILURE,
+                          "Failed to encode short name [%s].\n",
+                          short_name);
+                    ret = ENOMEM;
+                    goto done;
+                }
                 filter = talloc_asprintf(rest_ctx, "search=%s&exact=true",
-                                                   short_name);
+                                                   short_name_enc);
             }
         }
         break;
@@ -470,6 +478,8 @@ errno_t oidc_get_id(TALLOC_CTX *mem_ctx, enum oidc_cmd oidc_cmd,
                     char *input, enum search_str_type input_type,
                     bool libcurl_debug, const char *ca_db,
                     const char *client_id, const char *client_secret,
+                    const char *pkcs12_client_creds,
+                    enum client_auth_method client_auth_method,
                     const char *token_endpoint, const char *scope, char **out)
 {
     errno_t ret;
@@ -488,7 +498,9 @@ errno_t oidc_get_id(TALLOC_CTX *mem_ctx, enum oidc_cmd oidc_cmd,
         return EINVAL;
     }
 
-    rest_ctx = get_rest_ctx(mem_ctx, libcurl_debug, ca_db);
+    rest_ctx = get_rest_ctx(mem_ctx, libcurl_debug, ca_db,
+                            pkcs12_client_creds, client_auth_method,
+                            client_secret);
     if (rest_ctx == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "Failed to get REST context.\n");
         return ENOMEM;

@@ -46,6 +46,7 @@
 #define CHILD_OPT_CANONICALIZE "canonicalize"
 #define CHILD_OPT_SSS_CREDS_PASSWORD "sss-creds-password"
 #define CHILD_OPT_CHECK_PAC "check-pac"
+#define CHILD_OPT_SET_ENV "set-env"
 
 struct krb5child_req {
     struct pam_data *pd;
@@ -97,7 +98,7 @@ struct tevent_req *krb5_auth_send(TALLOC_CTX *mem_ctx,
                                   struct be_ctx *be_ctx,
                                   struct pam_data *pd,
                                   struct krb5_ctx *krb5_ctx);
-int krb5_auth_recv(struct tevent_req *req, int *pam_status, int *dp_err);
+int krb5_auth_recv(struct tevent_req *req, int *pam_status);
 
 struct tevent_req *handle_child_send(TALLOC_CTX *mem_ctx,
                                      struct tevent_context *ev,
@@ -148,7 +149,6 @@ struct tevent_req *krb5_auth_queue_send(TALLOC_CTX *mem_ctx,
                                         struct krb5_ctx *krb5_ctx);
 
 int krb5_auth_queue_recv(struct tevent_req *req,
-                         int *_pam_status,
-                         int *_dp_err);
+                         int *_pam_status);
 
 #endif /* __KRB5_AUTH_H__ */

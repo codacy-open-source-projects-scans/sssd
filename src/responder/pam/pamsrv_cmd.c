@@ -40,6 +40,7 @@
 #include "responder/pam/pamsrv_json.h"
 #include "responder/pam/pamsrv_passkey.h"
 #include "responder/pam/pam_helpers.h"
+#include "util/sss_client_envs.h"
 #include "responder/common/cache_req/cache_req.h"
 
 enum pam_verbosity {
@@ -279,6 +280,29 @@ static int pd_set_primary_name(const struct ldb_message *msg,struct pam_data *pd
     return EOK;
 }
 
+static int extract_client_envs(TALLOC_CTX *mem_ctx,
+                               const char ***_envs, size_t size, uint8_t *body,
+                               size_t blen, size_t *c)
+{
+    const char **envs = NULL;
+    uint8_t *data;
+    size_t count;
+    int ret;
+
+    if (*c + size > blen || SIZE_T_OVERFLOW(*c, size)) return EINVAL;
+
+    data = body + (*c);
+    if (size == 0 || data[size - 1] != '\0') return EINVAL;
+
+    ret = parse_client_env_list(mem_ctx, data, size, &envs, &count);
+    if (ret != EOK) return ret;
+
+    *_envs = envs;
+    *c += size;
+
+    return EOK;
+}
+
 static int pam_parse_in_data_v2(struct pam_data *pd,
                                 uint8_t *body, size_t blen)
 {
@@ -408,6 +432,11 @@ static int pam_parse_in_data_v2(struct pam_data *pd,
                                          blen, &c);
                     if (ret != EOK) return ret;
                     break;
+                case SSS_PAM_ITEM_CLIENT_ENVS:
+                    ret = extract_client_envs(pd, &pd->client_envs,
+                                              size, body, blen, &c);
+                    if (ret != EOK) return ret;
+                    break;
                 default:
                     DEBUG(SSSDBG_CRIT_FAILURE,
                           "Ignoring unknown data type [%d].\n", type);
@@ -450,6 +479,11 @@ static int extract_authtok_v1(struct sss_auth_token *tok,
 
     SAFEALIGN_COPY_UINT32_CHECK(&auth_token_type, &body[*c], blen, c);
     SAFEALIGN_COPY_UINT32_CHECK(&auth_token_length, &body[*c], blen, c);
+
+    if (*c + auth_token_length > blen || SIZE_T_OVERFLOW(*c, auth_token_length)) {
+        return EINVAL;
+    }
+
     auth_token_data = body+(*c);
 
     switch (auth_token_type) {
@@ -477,28 +511,38 @@ static int pam_parse_in_data(struct pam_data *pd,
     size_t last;
     int ret;
 
+    /* A valid v1 request holds five NUL-terminated strings (user, service,
+     * tty, ruser, rhost) followed by two auth tokens. Each string needs at
+     * least its terminator and each auth token needs a type+length header,
+     * so anything smaller is malformed.
+     */
+    if (blen < (5 + 2*2*sizeof(uint32_t))) {
+        DEBUG(SSSDBG_CRIT_FAILURE, "Received data is invalid.\n");
+        return EINVAL;
+    }
+
     last = blen - 1;
     end = 0;
 
     /* user name */
     for (start = end; end < last; end++) if (body[end] == '\0') break;
-    if (body[end++] != '\0') return EINVAL;
+    if (end >= blen || body[end++] != '\0') return EINVAL;
     pd->logon_name = (char *) &body[start];
 
     for (start = end; end < last; end++) if (body[end] == '\0') break;
-    if (body[end++] != '\0') return EINVAL;
+    if (end >= blen || body[end++] != '\0') return EINVAL;
     pd->service = (char *) &body[start];
 
     for (start = end; end < last; end++) if (body[end] == '\0') break;
-    if (body[end++] != '\0') return EINVAL;
+    if (end >= blen || body[end++] != '\0') return EINVAL;
     pd->tty = (char *) &body[start];
 
     for (start = end; end < last; end++) if (body[end] == '\0') break;
-    if (body[end++] != '\0') return EINVAL;
+    if (end >= blen || body[end++] != '\0') return EINVAL;
     pd->ruser = (char *) &body[start];
 
     for (start = end; end < last; end++) if (body[end] == '\0') break;
-    if (body[end++] != '\0') return EINVAL;
+    if (end >= blen || body[end++] != '\0') return EINVAL;
     pd->rhost = (char *) &body[start];
 
     ret = extract_authtok_v1(pd->authtok, body, blen, &end);
@@ -968,8 +1012,10 @@ errno_t pam_get_auth_types(struct pam_data *pd,
     }
 
     DEBUG(SSSDBG_TRACE_ALL, "Authentication types for user [%s] and service "
-                            "[%s]:%s%s%s%s%s\n", pd->user, pd->service,
-                            types.password_auth ? " password": "",
+                            "[%s]:%s%s%s%s%s\n",
+                            pd->user ? pd->user : "-",
+                            pd->service ? pd->service : "-",
+                            types.password_auth ? " password" : "",
                             types.otp_auth ? " two-factor" : "",
                             types.passkey_auth ? " passkey" : "",
                             types.oauth2_auth ? " oauth2" : "",
@@ -1319,7 +1365,7 @@ void pam_reply(struct pam_auth_req *preq)
          * (PAM_BAD_ITEM), so let's try authentication against the Smartcard
          * PAM_NO_MODULE_DATA is returned by the krb5 backend if no
          * authentication method was found at all, this might happen if the
-         * user has a Smartcard assigned but the pkint plugin is not available
+         * user has a Smartcard assigned but the pkinit plugin is not available
          * on the client. */
         DEBUG(SSSDBG_IMPORTANT_INFO,
               "Backend cannot handle Smartcard authentication, "
@@ -1864,6 +1910,13 @@ get_domain_request_type(struct pam_auth_req *preq,
     /* By default, only POSIX domains are to be contacted */
     req_dom_type = CACHE_REQ_POSIX_DOM;
 
+    /* SSS_PAM_ITEM_SERVICE is optional in the client protocol, so the service
+     * may be unset. Without a service name it can never match a configured
+     * application service, so fall back to the POSIX default. */
+    if (preq->pd->service == NULL) {
+        return req_dom_type;
+    }
+
     for (int i = 0; pctx->app_services[i]; i++) {
         if (strcmp(pctx->app_services[i], preq->pd->service) == 0) {
             req_dom_type = CACHE_REQ_APPLICATION_DOM;
@@ -1945,7 +1998,7 @@ static errno_t check_cert(TALLOC_CTX *mctx,
 
     req = pam_check_cert_send(mctx, ev,
                               pctx->ca_db, p11_child_timeout,
-                              cert_verification_opts, pctx->sss_certmap_ctx,
+                              cert_verification_opts, pctx,
                               uri, pd);
     if (req == NULL) {
         DEBUG(SSSDBG_OP_FAILURE, "pam_check_cert_send failed.\n");
@@ -2796,7 +2849,6 @@ static bool pam_can_user_cache_auth(struct sss_domain_info *domain,
 
 static void pam_dom_forwarder(struct pam_auth_req *preq)
 {
-    TALLOC_CTX *tmp_ctx = NULL;
     int ret;
     struct pam_ctx *pctx =
             talloc_get_type(preq->cctx->rctx->pvt_ctx, struct pam_ctx);
@@ -2807,11 +2859,6 @@ static void pam_dom_forwarder(struct pam_auth_req *preq)
     size_t c;
     char *local_policy = NULL;
     bool found = false;
-
-    tmp_ctx = talloc_new(NULL);
-    if (tmp_ctx == NULL) {
-        return;
-    }
 
     if (!preq->pd->domain) {
         preq->pd->domain = preq->domain->name;
@@ -2904,7 +2951,10 @@ static void pam_dom_forwarder(struct pam_auth_req *preq)
                     found = true;
                     if (preq->pd->cmd == SSS_PAM_PREAUTH) {
                         ret = sss_authtok_set_sc(preq->pd->authtok,
-                                 SSS_AUTHTOK_TYPE_SC_PIN, NULL, 0,
+                                 sss_cai_get_has_protected_authentication_path(preq->current_cert)
+                                                    ? SSS_AUTHTOK_TYPE_SC_KEYPAD
+                                                    : SSS_AUTHTOK_TYPE_SC_PIN,
+                                 NULL, 0,
                                  sss_cai_get_token_name(preq->current_cert), 0,
                                  sss_cai_get_module_name(preq->current_cert), 0,
                                  sss_cai_get_key_id(preq->current_cert), 0,
@@ -2933,7 +2983,6 @@ static void pam_dom_forwarder(struct pam_auth_req *preq)
 
         if (found) {
             if (local_policy != NULL && strcasecmp(local_policy, "only") == 0) {
-                talloc_free(tmp_ctx);
                 DEBUG(SSSDBG_IMPORTANT_INFO,
                       "Local auth only set and matching certificate was found, "
                       "skipping online auth\n");
@@ -2975,7 +3024,6 @@ static void pam_dom_forwarder(struct pam_auth_req *preq)
     }
 
     if (local_policy != NULL && strcasecmp(local_policy, "only") == 0) {
-        talloc_free(tmp_ctx);
         DEBUG(SSSDBG_IMPORTANT_INFO, "Local auth only set, skipping online auth\n");
         if (preq->pd->cmd == SSS_PAM_PREAUTH) {
             preq->pd->pam_status = PAM_SUCCESS;
@@ -2991,8 +3039,6 @@ static void pam_dom_forwarder(struct pam_auth_req *preq)
     preq->callback = pam_reply;
     ret = pam_dp_send_req(preq);
     DEBUG(SSSDBG_CONF_SETTINGS, "pam_dp_send_req returned %d\n", ret);
-
-    talloc_free(tmp_ctx);
 
     if (ret != EOK) {
         preq->pd->pam_status = PAM_SYSTEM_ERR;

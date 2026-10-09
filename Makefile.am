@@ -33,11 +33,6 @@ builddir ?= .
 SETCAP = @SETCAP@
 DOXYGEN = @DOXYGEN@
 
-DISTSETUPOPTS =
-if HAVE_DEBIAN
-DISTSETUPOPTS += --install-layout=deb
-endif
-
 sssdlibexecdir = $(libexecdir)/sssd
 sssdlibdir = $(libdir)/sssd
 sssddefaultconfdir = $(sssdlibdir)/conf
@@ -101,7 +96,11 @@ ifp_dbus_exec_cmd = $(sssdlibexecdir)/sssd_ifp --socket-activated
 ifp_systemdservice = SystemdService=sssd-ifp.service
 # SSSD requires a configuration file (either /etc/sssd/sssd.conf,
 # or some snippet under /etc/sssd/sssd.conf.d/) to be present.
+if HAVE_VENDORDIR
+condconfigexists = ConditionPathExists=\|@SSSD_VENDOR_DIR@/sssd.conf\nConditionPathExists=\|/etc/sssd/sssd.conf\nConditionDirectoryNotEmpty=\|/etc/sssd/conf.d/
+else
 condconfigexists = ConditionPathExists=\|/etc/sssd/sssd.conf\nConditionDirectoryNotEmpty=\|/etc/sssd/conf.d/
+endif
 
 # Bounding set needs to list capabilities required by ldap/krb5/selinux_childs and sssd_pam, otherwise they can't gain it.
 # Capabilities usage by binaries:
@@ -321,6 +320,7 @@ if HAVE_CMOCKA
         test_krb5_idp_plugin \
         test_sss_pam_data \
         test_pamsrv_json \
+        test_oidc_user_id \
         $(NULL)
 
 
@@ -379,13 +379,6 @@ endif # HAVE_CMOCKA
 
 PYTHON_TESTS =
 
-if BUILD_PYTHON2_BINDINGS
-PYTHON_TESTS += src/config/SSSDConfigTest.py2.sh \
-                src/tests/pyhbac-test.py2.sh \
-                src/tests/pysss-test.py2.sh \
-                src/tests/pysss_murmur-test.py2.sh \
-                $(NULL)
-endif
 if BUILD_PYTHON3_BINDINGS
 PYTHON_TESTS += src/config/SSSDConfigTest.py3.sh \
                 src/tests/pyhbac-test.py3.sh \
@@ -455,15 +448,6 @@ noinst_LTLIBRARIES =
 
 pkglib_LTLIBRARIES =
 
-if BUILD_PYTHON2_BINDINGS
-py2exec_LTLIBRARIES = \
-    _py2sss.la \
-    _py2hbac.la \
-    _py2sss_murmur.la \
-    _py2sss_nss_idmap.la \
-    $(NULL)
-endif
-
 if BUILD_PYTHON3_BINDINGS
 py3exec_LTLIBRARIES = \
     _py3sss.la \
@@ -479,12 +463,10 @@ sbin_SCRIPTS = \
 
 dist_noinst_SCRIPTS = \
     $(EXTRA_SCRIPTS) \
-    src/config/setup.py \
     src/config/SSSDConfig/ipachangeconf.py \
     src/config/SSSDConfig/sssdoptions.py \
     src/config/SSSDConfig/__init__.py \
     src/config/SSSDConfigTest.py \
-    src/config/SSSDConfigTest.py2.sh \
     src/config/SSSDConfigTest.py3.sh \
     contrib/fedora/bashrc_sssd \
     contrib/fedora/make_srpm.sh \
@@ -502,13 +484,10 @@ dist_noinst_SCRIPTS = \
     contrib/git/pre-push \
     contrib/vagrant/bootstrap.sh \
     src/tests/pyhbac-test.py \
-    src/tests/pyhbac-test.py2.sh \
     src/tests/pyhbac-test.py3.sh \
     src/tests/pysss-test.py \
-    src/tests/pysss-test.py2.sh \
     src/tests/pysss-test.py3.sh \
     src/tests/pysss_murmur-test.py \
-    src/tests/pysss_murmur-test.py2.sh \
     src/tests/pysss_murmur-test.py3.sh \
     src/tests/python-test.py \
     src/tests/whitespace_test \
@@ -717,6 +696,8 @@ dist_noinst_HEADERS = \
     src/util/safe-format-string.h \
     src/util/session_recording.h \
     src/util/strtonum.h \
+    src/util/client_envs.h \
+    src/util/sss_client_envs.h \
     src/util/sss_cli_cmd.h \
     src/util/sss_chain_id_tevent.h \
     src/util/sss_chain_id.h \
@@ -1282,6 +1263,8 @@ libsss_util_la_SOURCES = \
     src/util/atomic_io.c \
     src/util/authtok.c \
     src/util/authtok-utils.c \
+    src/util/client_envs.c \
+    src/util/sss_client_envs.c \
     src/util/domain_info_utils.c \
     src/util/util_lock.c \
     src/util/util_errors.c \
@@ -1302,6 +1285,7 @@ libsss_util_la_SOURCES = \
     src/util/sss_chain_id.c \
     src/util/sss_time.c \
     src/util/sss_prctl.c \
+    src/util/sss_config.c \
     $(NULL)
 libsss_util_la_CFLAGS = \
     $(AM_CFLAGS) \
@@ -1796,7 +1780,6 @@ sssd_be_SOURCES = \
     src/providers/data_provider/dp_iface_failover.c \
     src/providers/data_provider/dp_resp_client.c \
     src/providers/data_provider/dp_request.c \
-    src/providers/data_provider/dp_reply_std.c \
     src/providers/data_provider/dp_target_sudo.c \
     src/providers/data_provider/dp_target_hostid.c \
     src/providers/data_provider/dp_target_autofs.c \
@@ -2662,6 +2645,29 @@ test_pamsrv_json_LDADD = \
 if BUILD_SAMBA
 test_pamsrv_json_LDADD += $(NDR_KRB5PAC_LIBS)
 endif
+
+test_oidc_user_id_SOURCES = \
+    src/oidc_child/oidc_child_user_id.c \
+    src/util/string_utils.c \
+    src/tests/cmocka/test_oidc_user_id.c \
+    $(NULL)
+test_oidc_user_id_CFLAGS = \
+    $(AM_CFLAGS) \
+    $(CMOCKA_CFLAGS) \
+    $(POPT_CFLAGS) \
+    $(JANSSON_CFLAGS) \
+    $(CRYPTO_CFLAGS) \
+    $(NULL)
+test_oidc_user_id_LDADD = \
+    libsss_debug.la \
+    libsss_crypt.la \
+    libsss_test_common.la \
+    $(CMOCKA_LIBS) \
+    $(TALLOC_LIBS) \
+    $(POPT_LIBS) \
+    $(JANSSON_LIBS) \
+    $(CRYPTO_LIBS) \
+    $(NULL)
 
 test_sss_pam_data_SOURCES = \
     src/util/sss_pam_data.c \
@@ -3674,6 +3680,11 @@ test_cert_utils_LDADD = \
     libsss_crypt.la \
     libsss_certmap.la \
     $(NULL)
+if BUILD_OIDC_CHILD
+    test_cert_utils_SOURCES += src/oidc_child/libcrypto/oidc_child_get_jwk.c
+    test_cert_utils_CFLAGS += $(JOSE_CFLAGS)
+    test_cert_utils_LDADD += $(JOSE_LIBS)
+endif
 
 test_data_provider_be_SOURCES = \
     src/providers/data_provider_be.c \
@@ -4211,6 +4222,7 @@ pam_sss_la_SOURCES = \
     src/sss_client/sss_cli.h \
     src/util/atomic_io.c \
     src/util/authtok-utils.c \
+    src/util/client_envs.c \
     src/util/memory_erase.c \
     src/sss_client/sss_pam_macros.h \
     src/sss_client/sss_pam_compat.h
@@ -4741,6 +4753,7 @@ krb5_child_SOURCES = \
     src/util/sss_chain_id.c \
     src/util/strtonum.c \
     src/util/util_errors.c \
+    src/util/client_envs.c \
     src/sss_client/common.c \
     src/krb5_plugin/common/utils.c \
     src/krb5_plugin/idp/idp_utils.c \
@@ -4876,6 +4889,7 @@ p11_child_SOURCES = \
     src/util/util_ext.c \
     src/util/sss_chain_id.c \
     src/util/sss_prctl.c \
+    src/util/client_envs.c \
     $(NULL)
 p11_child_SOURCES += src/p11_child/p11_child_openssl.c
 
@@ -4934,14 +4948,19 @@ oidc_child_SOURCES = \
     src/oidc_child/oidc_child.c \
     src/oidc_child/oidc_child_curl.c \
     src/oidc_child/oidc_child_json.c \
+    src/oidc_child/oidc_child_user_id.c \
     src/oidc_child/oidc_child_id.c \
+    src/oidc_child/libcrypto/oidc_child_get_jwk.c \
     src/util/child_bootstrap.c \
     src/util/atomic_io.c \
     src/util/memory.c \
     src/util/memory_erase.c \
     src/util/strtonum.c \
+    src/util/string_utils.c \
+    src/util/util_ext.c \
     src/util/sss_chain_id.c \
     src/util/sss_prctl.c \
+    src/util/cert/libcrypto/cert.c \
     $(NULL)
 oidc_child_CFLAGS = \
     $(AM_CFLAGS) \
@@ -4949,14 +4968,19 @@ oidc_child_CFLAGS = \
     $(JANSSON_CFLAGS) \
     $(JOSE_CFLAGS) \
     $(CURL_CFLAGS) \
+    $(UUID_CFLAGS) \
+    $(CRYPTO_CFLAGS) \
     $(NULL)
 oidc_child_LDADD = \
     libsss_debug.la \
+    libsss_crypt.la \
     $(TALLOC_LIBS) \
     $(POPT_LIBS) \
     $(JANSSON_LIBS) \
     $(JOSE_LIBS) \
     $(CURL_LIBS) \
+    $(UUID_LIBS) \
+    $(CRYPTO_LIBS) \
     $(NULL)
 endif
 
@@ -5037,6 +5061,7 @@ sssd_krb5_idp_plugin_la_LIBADD = \
 sssd_krb5_idp_plugin_la_LDFLAGS = \
     -avoid-version \
     -module \
+    -export-symbols-regex '.*_idp_initvt$$' \
     $(NULL)
 
 dist_noinst_HEADERS += src/krb5_plugin/idp/idp.h
@@ -5065,6 +5090,7 @@ sssd_krb5_passkey_plugin_la_LIBADD = \
 sssd_krb5_passkey_plugin_la_LDFLAGS = \
     -avoid-version \
     -module \
+    -export-symbols-regex '.*_passkey_initvt$$' \
     $(NULL)
 
 dist_noinst_HEADERS += src/krb5_plugin/passkey/passkey.h
@@ -5094,16 +5120,6 @@ pysss_la_LDFLAGS = \
     -avoid-version \
     -module
 
-_py2sss_la_SOURCES = $(pysss_la_SOURCES)
-_py2sss_la_CFLAGS = \
-    $(AM_CFLAGS)  \
-    $(PYTHON2_CFLAGS)
-_py2sss_la_LIBADD = \
-    $(SSSD_INTERNAL_LTLIBS) \
-    $(PYTHON_BINDINGS_LIBS) \
-    $(PYTHON2_LIBS)
-_py2sss_la_LDFLAGS = $(pysss_la_LDFLAGS)
-
 _py3sss_la_SOURCES = $(pysss_la_SOURCES)
 _py3sss_la_CFLAGS = \
     $(AM_CFLAGS)  \
@@ -5122,15 +5138,6 @@ pyhbac_la_LDFLAGS = \
     -avoid-version \
     -module
 
-_py2hbac_la_SOURCES = $(pyhbac_la_SOURCES)
-_py2hbac_la_CFLAGS = \
-    $(AM_CFLAGS)  \
-    $(PYTHON2_CFLAGS)
-_py2hbac_la_LIBADD = \
-    $(PYTHON2_LIBS) \
-    libipa_hbac.la
-_py2hbac_la_LDFLAGS = $(pyhbac_la_LDFLAGS)
-
 _py3hbac_la_SOURCES = $(pyhbac_la_SOURCES)
 _py3hbac_la_CFLAGS = \
     $(AM_CFLAGS)  \
@@ -5148,14 +5155,6 @@ pysss_murmur_la_LDFLAGS = \
     -avoid-version \
     -module
 
-_py2sss_murmur_la_SOURCES = $(pysss_murmur_la_SOURCES)
-_py2sss_murmur_la_CFLAGS = \
-    $(AM_CFLAGS)  \
-    $(PYTHON2_CFLAGS)
-_py2sss_murmur_la_LIBADD = \
-    $(PYTHON2_LIBS)
-_py2sss_murmur_la_LDFLAGS = $(pysss_murmur_la_LDFLAGS)
-
 _py3sss_murmur_la_SOURCES = $(pysss_murmur_la_SOURCES)
 _py3sss_murmur_la_CFLAGS = \
     $(AM_CFLAGS)  \
@@ -5170,15 +5169,6 @@ pysss_nss_idmap_la_SOURCES = \
 pysss_nss_idmap_la_LDFLAGS = \
     -avoid-version \
     -module
-
-_py2sss_nss_idmap_la_SOURCES = $(pysss_nss_idmap_la_SOURCES)
-_py2sss_nss_idmap_la_CFLAGS = \
-    $(AM_CFLAGS)  \
-    $(PYTHON2_CFLAGS)
-_py2sss_nss_idmap_la_LIBADD = \
-    $(PYTHON2_LIBS) \
-    libsss_nss_idmap.la
-_py2sss_nss_idmap_la_LDFLAGS = $(pysss_nss_idmap_la_LDFLAGS)
 
 _py3sss_nss_idmap_la_SOURCES = $(pysss_nss_idmap_la_SOURCES)
 _py3sss_nss_idmap_la_CFLAGS = \
@@ -5541,50 +5531,16 @@ SSSSCONFIG_MODULES =
 endif
 
 all-local: ldb_mod_test_dir $(SSSDCONFIG_MODULES)
-if BUILD_PYTHON2_BINDINGS
-	cd $(builddir)/src/config; \
-	$(PYTHON2) setup.py build --build-base $(abs_builddir)/src/config
-endif
-if BUILD_PYTHON3_BINDINGS
-	cd $(builddir)/src/config; \
-	$(PYTHON3) setup.py build --build-base $(abs_builddir)/src/config
-endif
 
 install-exec-hook: installsssddirs
-if BUILD_PYTHON2_BINDINGS
-	if [ "$(DESTDIR)" = "" ]; then \
-		cd $(builddir)/src/config; \
-		$(MKDIR_P) "$(python2dir)"; \
-		PYTHONPATH="$(PYTHONPATH):$(python2dir)" $(PYTHON2) setup.py build \
-			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON2_PREFIX) \
-			--record=$(abs_builddir)/src/config/.files2; \
-	else \
-		cd $(builddir)/src/config; \
-		$(MKDIR_P) "$(python2dir)"; \
-		PYTHONPATH="$(PYTHONPATH):$(python2dir)" $(PYTHON2) setup.py build \
-			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON2_PREFIX) \
-			--record=$(abs_builddir)/src/config/.files2 --root=$(DESTDIR); \
-	fi
-	cd $(DESTDIR)$(py2execdir) && \
-		mv -f _py2sss.so pysss.so ; \
-		mv -f _py2hbac.so pyhbac.so ; \
-		mv -f _py2sss_murmur.so pysss_murmur.so ; \
-		mv -f _py2sss_nss_idmap.so pysss_nss_idmap.so
-endif
 if BUILD_PYTHON3_BINDINGS
-	if [ "$(DESTDIR)" = "" ]; then \
-		cd $(builddir)/src/config; \
-		$(MKDIR_P) "$(python3dir)"; \
-		PYTHONPATH="$(PYTHONPATH):$(python3dir)" $(PYTHON3) setup.py build \
-			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON3_PREFIX) \
-			--record=$(abs_builddir)/src/config/.files3; \
-	else \
-		cd $(builddir)/src/config; \
-		$(MKDIR_P) "$(python3dir)"; \
-		PYTHONPATH="$(PYTHONPATH):$(python3dir)" $(PYTHON3) setup.py build \
-			--build-base $(abs_builddir)/src/config install $(DISTSETUPOPTS) --prefix=$(PYTHON3_PREFIX) \
-			--record=$(abs_builddir)/src/config/.files3 --root=$(DESTDIR); \
-	fi
+	$(MKDIR_P) "$(DESTDIR)$(python3dir)/SSSDConfig"
+	$(INSTALL_DATA) $(builddir)/src/config/SSSDConfig/__init__.py \
+		"$(DESTDIR)$(python3dir)/SSSDConfig/__init__.py"
+	$(INSTALL_DATA) $(builddir)/src/config/SSSDConfig/ipachangeconf.py \
+		"$(DESTDIR)$(python3dir)/SSSDConfig/ipachangeconf.py"
+	$(INSTALL_DATA) $(builddir)/src/config/SSSDConfig/sssdoptions.py \
+		"$(DESTDIR)$(python3dir)/SSSDConfig/sssdoptions.py"
 	cd $(DESTDIR)$(py3execdir) && \
 		mv -f _py3sss.so pysss.so ; \
 		mv -f _py3hbac.so pyhbac.so ; \
@@ -5644,52 +5600,19 @@ endif
 endif
 
 uninstall-hook:
-	if [ -f $(abs_builddir)/src/config/.files2 ]; then \
-	    cat $(abs_builddir)/src/config/.files2 | xargs -iq rm -f $(DESTDIR)/q; \
-	    rm $(abs_builddir)/src/config/.files2 ; \
-	fi
-	if [ -f $(abs_builddir)/src/config/.files3 ]; then \
-	    cat $(abs_builddir)/src/config/.files3 | xargs -iq rm -f $(DESTDIR)/q; \
-	    rm $(abs_builddir)/src/config/.files3 ; \
-	fi
 	for doc in $(SSSD_DOCS); do \
 		rm -Rf $(DESTDIR)/$(docdir)/$$doc; \
 	done;
-if BUILD_PYTHON2_BINDINGS
-	cd $(DESTDIR)$(py2execdir) && \
-		rm -f pysss.so pyhbac.so pysss_murmur.so pysss_nss_idmap.so
-	rm -fr "$(DESTDIR)$(python2dir)/easy-install.pth"
-	rm -fr "$(DESTDIR)$(python2dir)/__pycache__"
-	rm -fr "$(DESTDIR)$(python2dir)/site.py"
-endif
 if BUILD_PYTHON3_BINDINGS
+	rm -rf "$(DESTDIR)$(python3dir)/SSSDConfig"
 	cd $(DESTDIR)$(py3execdir) && \
 		rm -f pysss.so pyhbac.so pysss_murmur.so pysss_nss_idmap.so
-	rm -fr "$(DESTDIR)$(python3dir)/easy-install.pth"
-	rm -fr "$(DESTDIR)$(python3dir)/__pycache__"
-	rm -fr "$(DESTDIR)$(python3dir)/site.py"
 endif
 if BUILD_SAMBA
 	rm $(DESTDIR)/$(winbindplugindir)/sss.so
 endif
 
 clean-local:
-if BUILD_PYTHON2_BINDINGS
-	if [ ! $(srcdir)/src/config/SSSDConfig/ipachangeconf.py -ef $(builddir)/src/config/SSSDConfig/ipachangeconf.py ]; then \
-		rm -f $(builddir)/src/config/SSSDConfig/ipachangeconf.py ; \
-	fi
-
-	if [ ! $(srcdir)/src/config/SSSDConfig/sssdoptions.py -ef $(builddir)/src/config/SSSDConfig/sssdoptions.py ]; then \
-		rm -f $(builddir)/src/config/SSSDConfig/sssdoptions.py ; \
-	fi
-
-	cd $(builddir)/src/config; $(PYTHON2) setup.py build --build-base $(abs_builddir)/src/config clean --all
-
-	rm -fr "$(builddir)/src/config/dist"
-	rm -fr "$(builddir)/src/config/SSSDConfig.egg-info"
-	rm -fr "$(builddir)/src/config/SSSDConfig/__pycache__"
-	find "$(builddir)/src/config/SSSDConfig" -name "*.py[co]" -delete
-endif
 if BUILD_PYTHON3_BINDINGS
 	if [ ! $(srcdir)/src/config/SSSDConfig/ipachangeconf.py -ef $(builddir)/src/config/SSSDConfig/ipachangeconf.py ]; then \
 		rm -f $(builddir)/src/config/SSSDConfig/ipachangeconf.py ; \
@@ -5699,10 +5622,6 @@ if BUILD_PYTHON3_BINDINGS
 		rm -f $(builddir)/src/config/SSSDConfig/sssdoptions.py ; \
 	fi
 
-	cd $(builddir)/src/config; $(PYTHON3) setup.py build --build-base $(abs_builddir)/src/config clean --all
-
-	rm -fr "$(builddir)/src/config/dist"
-	rm -fr "$(builddir)/src/config/SSSDConfig.egg-info"
 	rm -fr "$(builddir)/src/config/SSSDConfig/__pycache__"
 	find "$(builddir)/src/config/SSSDConfig" -name "*.py[co]" -delete
 endif

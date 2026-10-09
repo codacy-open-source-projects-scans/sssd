@@ -1218,8 +1218,13 @@ class LdapOperations(object):
         self.uri = uri if not port else '%s:%s' % (uri, port)
         self.binddn = binddn
         self.bindpw = bindpw
-        self.conn = ldap.initialize(uri)
+        self.conn = ldap.initialize(self.uri)
+        self.conn.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER)
+        self.conn.set_option(ldap.OPT_X_TLS_NEWCTX, 0)
         self.conn = self.bind()
+        if isinstance(self.conn, tuple):
+            raise LdapException("Failed to bind to ldap server, Error: %s"
+                                % self.conn[0])
 
     def bind(self):
         """ Bind to ldap server
@@ -2263,14 +2268,14 @@ class ADDNS(object):  # pylint: disable=useless-object-inheritance
     def get_zones(self):
         """ Returns a list of all the forward and reverse zones  on the server excluding msdcs """
         zones = self.ad_host.run_command("dnscmd.exe /EnumZones").stdout_text
-        zone_list = re.sub("\n\s*\n", "\n", re.sub("(.*?)Cache(.*?)\n|(.*?)Zone(.*?)\n|(.*?)Enumerated(.*?)\n|"
+        zone_list = re.sub(r"\n\s*\n", "\n", re.sub("(.*?)Cache(.*?)\n|(.*?)Zone(.*?)\n|(.*?)Enumerated(.*?)\n|"
                            "(.*?)_msdcs(.*?)\n|(.*?)Command(.*?)\n", "", zones))
         return zone_list
 
     def print_zone(self, zone):
         """ Prints all the contents of a zone file, takes domain.com or 1.168.192.in-addr.arpa string """
         zone_out = self.ad_host.run_command(f"dnscmd.exe /zoneprint {zone}").stdout_text
-        zone = re.sub("\n\s*\n", "\n", re.sub("[;_](.*?)\n|.*?(NS|SOA|DnsZones|@).*?\n", "", zone_out))
+        zone = re.sub(r"\n\s*\n", "\n", re.sub("[;_](.*?)\n|.*?(NS|SOA|DnsZones|@).*?\n", "", zone_out))
 
         return zone
 

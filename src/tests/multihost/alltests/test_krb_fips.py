@@ -91,7 +91,7 @@ class Testkrbfips(object):
         multihost.client[0].service_sssd('restart')
         multihost.client[0].run_command("systemctl "
                                         "restart sssd-kcm")
-        ssh = SSHClient(multihost.client[0].sys_hostname, 'foo3', 'Secret123')
+        ssh = SSHClient(multihost.client[0].ip, 'foo3', 'Secret123')
         try:
             ssh.connect()
             ssh.execute_command('kdestroy -A -q')
@@ -252,7 +252,7 @@ class Testkrbfips(object):
         :title: krb5/fips: verify login fails when weak crypto is presented
         :id: cdd2ef0d-4921-40b3-b61e-0b271b2d5e00
         """
-        ldap_uri = 'ldap://%s' % (multihost.master[0].sys_hostname)
+        ldap_uri = 'ldap://%s' % (multihost.master[0].ip)
         ds_rootdn = 'cn=Directory Manager'
         ds_rootpw = 'Secret123'
         tools = sssdTools(multihost.client[0])
@@ -316,7 +316,7 @@ class Testkrbfips(object):
         tcpdump_cmd = 'tcpdump -s0 host %s -w %s' % (ldap_host, pcapfile)
         multihost.client[0].run_command(tcpdump_cmd, bg=True)
         pkill = 'pkill tcpdump'
-        client = SSHClient(multihost.client[0].sys_hostname, user, 'Secret123')
+        client = SSHClient(multihost.client[0].ip, user, 'Secret123')
         try:
             client.connect()
         except Exception:

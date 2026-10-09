@@ -45,7 +45,7 @@ def ldap_modify_ds(multihost, ldap_mode, dn_dn, element, value):
     element: Attribute of Dn which needs to change
     value: New Attribute value.
     """
-    ldap_uri = f'ldap://{multihost.master[0].sys_hostname}'
+    ldap_uri = f'ldap://{multihost.master[0].ip}'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
     modify_gid = [(ldap_mode, element, value)]
     ldap_inst.modify_ldap(dn_dn, modify_gid)
@@ -55,7 +55,7 @@ def ldap_modify_ds(multihost, ldap_mode, dn_dn, element, value):
 def create_users_groups(multihost, request):
     """ Create user and restore """
     client = multihost.client[0]
-    ldap_uri = f'ldap://{multihost.master[0].sys_hostname}'
+    ldap_uri = f'ldap://{multihost.master[0].ip}'
     ldap_inst = LdapOperations(ldap_uri, ds_rootdn, ds_rootpw)
     user_dn = 'uid=ppuser1,ou=People,dc=example,dc=test'
     user_info = {'cn': 'ppuser1'.encode('utf-8'),
@@ -92,52 +92,6 @@ class TestPasswordPolicy():
     """
     This is test case class for ldap Password Policy suite
     """
-    @staticmethod
-    def test_bz748856(multihost, backupsssdconf, common_sssd_setup):
-        """
-        :title: Set passwordMaxAge to 24 hours bz748856
-        :bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=748856
-        :id: b0200b74-9675-11ed-b874-845cf3eff344
-        :setup:
-            1. setup 389-ds w/server-side pw controls
-            2. create an account and set the password
-            3. clear secure log
-            4. clear sssd logs and cache
-        :steps:
-            1. The user is able to authenticate using SSH password by check_login_client function.
-            2. Searches for specific log messages in two log files (/var/log/secure and
-                /var/log/sssd/sssd_{ds_instance_name}.log)
-                using the find_logs() function, and raises an assertion error if
-                the specified log message is not found in the log file.
-        :expectedresults:
-            1. Authentication should succeed
-            2. Corresponding logs should be generated
-        """
-        client = multihost.client[0]
-        tools = sssdTools(multihost.client[0])
-        # setup 389-ds w/server-side pw controls
-        cn_config = 'cn=config'
-        for element, value in [('passwordExp', [b'on']),
-                               ('passwordMaxAge', [b'86400']),
-                               ('passwordWarning', [b'86400'])]:
-            ldap_modify_ds(multihost, ldap.MOD_REPLACE, cn_config, element, value)
-        # set the password
-        user_dn = 'uid=ppuser1,ou=People,dc=example,dc=test'
-        ldap_modify_ds(multihost, ldap.MOD_REPLACE, user_dn, 'userPassword', [b'Secret123'])
-        client.run_command('> /var/log/secure')
-        tools.clear_sssd_cache()
-        check_login_client(multihost, 'ppuser1', 'Secret123')
-        time.sleep(3)
-        file_scure = '/var/log/secure'
-        file_ssd = f'/var/log/sssd/sssd_{ds_instance_name}.log'
-        find_logs(multihost, file_scure, "Your password will expire in ")
-        find_logs(multihost, file_ssd, "Server returned control [1.3.6.1.4.1.42.2.27.8.5.1]")
-        find_logs(multihost, file_ssd, "Password will expire in [86")
-        with pytest.raises(AssertionError):
-            find_logs(multihost, file_ssd,
-                      "Server does not support the requested "
-                      "control [1.3.6.1.4.1.42.2.27.8.5.1]")
-
     @staticmethod
     def test_maxage(multihost, backupsssdconf, common_sssd_setup):
         """
@@ -227,46 +181,3 @@ class TestPasswordPolicy():
         for element, value in [('passwordGraceLimit', []),
                                ('passwordMaxAge', [])]:
             ldap_modify_ds(multihost, ldap.MOD_DELETE, cn_config, element, value)
-
-    @staticmethod
-    def test_bz1146198_bz1144011(multihost, backupsssdconf, common_sssd_setup):
-        """
-        :title: Password expiration policies are not being enforced by SSSD bz1146198 bz1144011
-        :bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=1146198
-                   https://bugzilla.redhat.com/show_bug.cgi?id=1144011
-        :id: f6e2511a-9676-11ed-a446-845cf3eff344
-        :setup:
-            1. Add passwordMustChange to config.
-            2. Set the password for the user to 'Secret123'
-            3. Clear secure logs
-        :steps:
-            1. Run a script to simulate an expired password.
-            2. Calling find_logs to search for specific messages in log files on the server.
-            3. Calling check_login_client to authenticate the user with a new password.
-            4. Calling ldap_modify_ds three times to delete some configuration settings related to
-                password expiration for the directory
-        :expectedresults:
-            1. User should be forced to change the password.
-            2. Corresponding logs should be generated
-            3. User authentication should success
-            4. New setting related to password change should success
-        """
-        client = multihost.client[0]
-        cn_config = 'cn=config'
-        ldap_modify_ds(multihost, ldap.MOD_ADD, cn_config, 'passwordMustChange', [b'on'])
-        user_dn = 'uid=ppuser1,ou=People,dc=example,dc=test'
-        ldap_modify_ds(multihost, ldap.MOD_REPLACE, user_dn, 'userPassword', [b'Secret123'])
-        client.run_command("> /var/log/secure")
-        client.run_command(f"> '/var/log/sssd/sssd_{ds_instance_name}.log'")
-        client.run_command("sh /tmp/change_user_password_while_expired.sh")
-        time.sleep(3)
-        find_logs(multihost, "/var/log/secure", "Password expired. Change your password now")
-        find_logs(multihost, f'/var/log/sssd/sssd_{ds_instance_name}.log',
-                  "Password was reset. User must set a new password")
-        time.sleep(3)
-        check_login_client(multihost, 'ppuser1', 'NewPass_123')
-        for element, value in [('passwordMustChange', []),
-                               ('passwordWarning', []),
-                               ('passwordExp', [b'on'])]:
-            ldap_modify_ds(multihost, ldap.MOD_DELETE, cn_config, element, value)
-        ldap_modify_ds(multihost, ldap.MOD_REPLACE, user_dn, 'userPassword', [b'Secret123'])

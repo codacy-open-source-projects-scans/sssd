@@ -1106,7 +1106,7 @@ ad_gpo_map_deny = +my_pam_service
                             <command>realm</command> will be used. Since
                             the helper is started as the user SSSD is running
                             as there might be the chance that the renewal will
-                            fail if this user does not has permissions to
+                            fail if this user does not have permissions to
                             modify the keytab file where the machine account
                             credentials are stored. This will typically be the
                             case for <command>adcli</command>.
@@ -1143,13 +1143,13 @@ ad_gpo_map_deny = +my_pam_service
                 </varlistentry>
 
                 <varlistentry>
-                    <term>ad_use_ldaps (bool)</term>
+                    <term>ad_use_ldaps (boolean)</term>
                     <listitem>
                         <para>
                             By default SSSD uses the plain LDAP port 389 and the
-                            Global Catalog port 3628. If this option is set to
+                            Global Catalog port 3268. If this option is set to
                             True SSSD will use the LDAPS port 636 and Global
-                            Catalog port 3629 with LDAPS protection. Since AD
+                            Catalog port 3269 with LDAPS protection. Since AD
                             does not allow to have multiple encryption layers on
                             a single connection and we still want to use
                             SASL/GSSAPI or SASL/GSS-SPNEGO for authentication
@@ -1175,11 +1175,6 @@ ad_gpo_map_deny = +my_pam_service
                             address of the AD LDAP connection is used for
                             the updates, if it is not otherwise specified
                             by using the <quote>dyndns_iface</quote> option.
-                        </para>
-                        <para>
-                            NOTE: On older systems (such as RHEL 5), for this
-                            behavior to work reliably, the default Kerberos
-                            realm must be set properly in /etc/krb5.conf
                         </para>
                         <para>
                             Default: true
@@ -1216,12 +1211,6 @@ ad_gpo_map_deny = +my_pam_service
                             all interfaces except <emphasis>eth1</emphasis>.
                             See <emphasis>man 7 glob</emphasis> for
                             details about patterns.
-                        </para>
-                        <para>
-                            NOTE: While it is still possible to use the old
-                            <emphasis>ipa_dyndns_iface</emphasis> option, users
-                            should migrate to using <emphasis>dyndns_iface</emphasis>
-                            in their config file.
                         </para>
                         <para>
                             Default: Use the IP addresses of the interface which
@@ -1263,10 +1252,9 @@ ad_gpo_map_deny = +my_pam_service
                             How often should the back end perform periodic DNS update in
                             addition to the automatic update performed when the back end
                             goes online.
-                            This option is optional and applicable only when dyndns_update
-                            is true. Note that the lowest possible value is 60 seconds in-case
-                            if value is provided less than 60, parameter will assume lowest
-                            value only.
+                            This is optional and applicable only when dyndns_update
+                            is true. Note that the minimum value is 60 seconds, any
+                            specified value below this threshold will default to 60.
                         </para>
                         <para>
                             Default: 86400 (24 hours)
@@ -1275,7 +1263,7 @@ ad_gpo_map_deny = +my_pam_service
                 </varlistentry>
 
                 <varlistentry>
-                    <term>dyndns_update_ptr (bool)</term>
+                    <term>dyndns_update_ptr (boolean)</term>
                     <listitem>
                         <para>
                             Whether the PTR record should also be explicitly
@@ -1294,7 +1282,7 @@ ad_gpo_map_deny = +my_pam_service
                 </varlistentry>
 
                 <varlistentry>
-                    <term>dyndns_force_tcp (bool)</term>
+                    <term>dyndns_force_tcp (boolean)</term>
                     <listitem>
                         <para>
                             Whether the nsupdate utility should default to using
@@ -1519,8 +1507,6 @@ ldap_account_expire_policy = ad
             schema attribute mapping (nisMap, nisObject, ...) is used,
             because these attributes are included in the default Active
             Directory schema.
-        </para>
-        <para>
         </para>
     </refsect1>
 

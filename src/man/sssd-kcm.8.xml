@@ -212,7 +212,6 @@ systemctl restart sssd-kcm.service
             </programlisting>
         </para>
         <para>
-            The KCM service is configured in the <quote>kcm</quote>
             For a detailed syntax reference, refer to the <quote>FILE FORMAT</quote> section of the
             <citerefentry>
                 <refentrytitle>sssd.conf</refentrytitle>
@@ -277,8 +276,8 @@ systemctl restart sssd-kcm.service
                 <term>max_ccache_size (integer)</term>
                 <listitem>
                     <para>
-                        How big can a credential cache be per ccache. Each
-                        service ticket accounts into this quota.
+                        How big a credential cache be per ccache. Each
+                        service ticket counts toward this quota.
                     </para>
                     <para>
                         Default: 65536
@@ -286,7 +285,7 @@ systemctl restart sssd-kcm.service
                 </listitem>
             </varlistentry>
             <varlistentry condition="enable_kcm_renewal">
-                <term>tgt_renewal (bool)</term>
+                <term>tgt_renewal (boolean)</term>
                 <listitem>
                     <para>
                         Enables TGT renewals functionality.

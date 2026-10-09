@@ -140,6 +140,7 @@ const char *sss_cai_get_token_name(struct cert_auth_info *i);
 const char *sss_cai_get_module_name(struct cert_auth_info *i);
 const char *sss_cai_get_key_id(struct cert_auth_info *i);
 const char *sss_cai_get_label(struct cert_auth_info *i);
+bool sss_cai_get_has_protected_authentication_path(struct cert_auth_info *i);
 struct cert_auth_info *sss_cai_get_next(struct cert_auth_info *i);
 struct ldb_result *sss_cai_get_cert_user_objs(struct cert_auth_info *i);
 void sss_cai_set_cert_user_objs(struct cert_auth_info *i,
@@ -152,7 +153,7 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
                                        const char *ca_db,
                                        time_t timeout,
                                        const char *verify_opts,
-                                       struct sss_certmap_ctx *sss_certmap_ctx,
+                                       struct pam_ctx *pctx,
                                        const char *uri,
                                        struct pam_data *pd);
 errno_t pam_check_cert_recv(struct tevent_req *req, TALLOC_CTX *mem_ctx,

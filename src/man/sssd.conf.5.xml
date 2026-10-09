@@ -3,6 +3,8 @@
 "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd"
 [
 <!ENTITY sssd_user_name SYSTEM "sssd_user_name.include">
+<!ENTITY sssd_conf_dir SYSTEM "sssd_conf_dir.include">
+<!ENTITY sssd_vendor_dir SYSTEM "sssd_vendor_dir.include">
 ]>
 <reference>
 <title>SSSD Manual pages</title>
@@ -37,7 +39,10 @@
 
         <para>
             The data types used are string (no quotes needed), integer
-            and bool (with values of <quote>TRUE/FALSE</quote>).
+            and boolean (with values of <quote>TRUE/FALSE</quote>).
+            Boolean values are case-insensitive; for example, <quote>TRUE</quote>,
+            <quote>True</quote> and <quote>true</quote> are all equivalent and
+            valid; the same applies to <quote>FALSE</quote>.
         </para>
 
         <para>
@@ -99,6 +104,39 @@
         </para>
     </refsect1>
 
+    <refsect1 id='vendor-dir' condition="have_vendordir">
+        <title>VENDOR PROVIDED CONFIGURATION</title>
+
+        <para>
+          The vendor provided configuration file is installed in
+          <filename>&sssd_vendor_dir;/sssd.conf</filename>, but this file must
+          not be directly edited. It can be completely masked by creating the
+          system specific configuration file
+          <filename>&sssd_conf_dir;/sssd.conf</filename>, or partly overriden
+          by creating config snippets in
+          <filename>&sssd_conf_dir;/conf.d</filename> directory.
+        </para>
+        <refsect2 id='vendor-dir-conf-hierarchy'>
+          <title>CONFIGURATION FILE HIERARCHY</title>
+        <para>
+          When sssd reads the configuration it first tries to open the system
+          specific configuration file in
+          <filename>&sssd_conf_dir;/sssd.conf</filename>. If it exists, it is
+          loaded and snippets from <filename>&sssd_conf_dir;/conf.d</filename>
+          are applied. The vendor provided configuration file
+          <filename>&sssd_vendor_dir;/sssd.conf</filename> is completely ignored
+          in this case.
+        </para>
+        <para>
+          If the system specific configuration file
+          <filename>&sssd_conf_dir;/sssd.conf</filename> does not exist, then
+          the vendor configuration file
+          <filename>&sssd_vendor_dir;/sssd.conf</filename> is loaded and
+          snippets from <filename>&sssd_conf_dir;/conf.d</filename> are applied.
+        </para>
+      </refsect2>
+    </refsect1>
+
     <refsect1 id='general-options'>
         <title>GENERAL OPTIONS</title>
         <para>
@@ -107,6 +145,11 @@
         </para>
         <refsect2 id='all-section-options'>
             <title>Options usable in all sections</title>
+            <para>
+            Note: Below options are ignored in <quote>[session_recording]</quote>
+            section, see <quote>Session recording configuration options</quote>
+            section for more details.
+            </para>
             <para>
               <variablelist>
                 <varlistentry>
@@ -127,7 +170,7 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>debug_timestamps (bool)</term>
+                    <term>debug_timestamps (boolean)</term>
                     <listitem>
                         <para>
                             Add a timestamp to the debug messages.
@@ -140,7 +183,7 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>debug_microseconds (bool)</term>
+                    <term>debug_microseconds (boolean)</term>
                     <listitem>
                         <para>
                             Add microseconds to the timestamp in debug messages.
@@ -153,7 +196,7 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>debug_backtrace_enabled (bool)</term>
+                    <term>debug_backtrace_enabled (boolean)</term>
                     <listitem>
                         <para>
                             Enable debug backtrace.
@@ -219,7 +262,7 @@
                 <variablelist>
                     <title>Section parameters</title>
                     <varlistentry>
-                        <term>services</term>
+                        <term>services (string)</term>
                         <listitem>
                             <para>
                                 Comma separated list of services that are
@@ -247,7 +290,7 @@
                         </listitem>
                     </varlistentry>
                     <varlistentry>
-                        <term>domains</term>
+                        <term>domains (string)</term>
                         <listitem>
                             <para>
                                 A domain is a database containing user
@@ -588,7 +631,7 @@
                         </listitem>
                     </varlistentry>
                     <varlistentry>
-                        <term>domain_resolution_order</term>
+                        <term>domain_resolution_order (string)</term>
                         <listitem>
                             <para>
                                 Comma separated list of domains and subdomains
@@ -720,7 +763,7 @@
             </para>
             <variablelist>
                 <varlistentry>
-                    <term>fd_limit</term>
+                    <term>fd_limit (integer)</term>
                     <listitem>
                         <para>
                             This option specifies the maximum number of file
@@ -735,7 +778,7 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>client_idle_timeout</term>
+                    <term>client_idle_timeout (integer)</term>
                     <listitem>
                         <para>
                             This option specifies the number of seconds that
@@ -752,96 +795,7 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>offline_timeout (integer)</term>
-                    <listitem>
-                        <para>
-                            When SSSD switches to offline mode the amount of
-                            time before it tries to go back online will
-                            increase based upon the time spent disconnected.
-                            By default SSSD uses incremental behaviour to
-                            calculate delay in between retries.
-                            So, the wait time for a given retry will be longer
-                            than the wait time for the previous ones.
-                            After each unsuccessful attempt to go online,
-                            the new interval is recalculated by the following:
-                        </para>
-                        <para>
-                             new_delay = Minimum(old_delay * 2, offline_timeout_max) + random[0...offline_timeout_random_offset]
-                        </para>
-                        <para>
-                            The offline_timeout default value is 60.
-                            The offline_timeout_max default value is 3600.
-                            The offline_timeout_random_offset default value is 30.
-                            The end result is amount of seconds before next retry.
-                        </para>
-                        <para>
-                            Note that the maximum length of each interval
-                            is defined by offline_timeout_max (apart of random part).
-                        </para>
-                        <para>
-                            Default: 60
-                        </para>
-                    </listitem>
-                </varlistentry>
-                <varlistentry>
-                    <term>offline_timeout_max (integer)</term>
-                    <listitem>
-                        <para>
-                            Controls by how much the time between attempts to go
-                            online can be incremented following unsuccessful
-                            attempts to go online.
-                        </para>
-                        <para>
-                            A value of 0 disables the incrementing behaviour.
-                        </para>
-                        <para>
-                            The value of this parameter should be set in correlation
-                            to offline_timeout parameter value.
-                        </para>
-                        <para>
-                            With offline_timeout set to 60 (default value) there is no point
-                            in setting offlinet_timeout_max to less than 120 as it will
-                            saturate instantly. General rule here should be to set
-                            offline_timeout_max to at least 4 times offline_timeout.
-                        </para>
-                        <para>
-                            Although a value between 0 and offline_timeout may be
-                            specified, it has the effect of overriding the
-                            offline_timeout value so is of little use.
-                        </para>
-                        <para>
-                            Default: 3600
-                        </para>
-                    </listitem>
-                </varlistentry>
-                <varlistentry>
-                    <term>offline_timeout_random_offset (integer)</term>
-                    <listitem>
-                        <para>
-                            When SSSD is in offline mode it keeps probing
-                            backend servers in specified time intervals:
-                        </para>
-                        <para>
-                            new_delay = Minimum(old_delay * 2, offline_timeout_max) + random[0...offline_timeout_random_offset]
-                        </para>
-                        <para>
-                            This parameter controls the value of the random offset
-                            used for the above equation. Final random_offset value
-                            will be random number in range:
-                        </para>
-                        <para>
-                            [0 - offline_timeout_random_offset]
-                        </para>
-                        <para>
-                            A value of 0 disables the random offset addition.
-                        </para>
-                        <para>
-                            Default: 30
-                        </para>
-                    </listitem>
-                </varlistentry>
-                <varlistentry>
-                    <term>responder_idle_timeout</term>
+                    <term>responder_idle_timeout (integer)</term>
                     <listitem>
                         <para>
                             This option specifies the number of seconds that
@@ -863,7 +817,7 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>cache_first</term>
+                    <term>cache_first (boolean)</term>
                     <listitem>
                         <para>
                             This option specifies whether the responder should
@@ -881,7 +835,8 @@
             <title>NSS configuration options</title>
             <para>
                 These options can be used to configure the
-                Name Service Switch (NSS) service.
+                Name Service Switch (NSS) service and should be
+                specified under the <quote>[nss]</quote> section.
             </para>
             <variablelist>
                 <varlistentry>
@@ -967,11 +922,11 @@
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>filter_users_in_groups (bool)</term>
+                    <term>filter_users_in_groups (boolean)</term>
                     <listitem>
                         <para>
-                            If you want filtered user still be group members
-                            set this option to false.
+                            If you want filtered users to remain group members
+                            set this option to false
                         </para>
                         <para>
                             Default: true
@@ -1067,6 +1022,9 @@ fallback_homedir = /home/%u
                         <para>
                             Replace any instance of these shells with the shell_fallback
                         </para>
+                        <para>
+                            Default: Not set
+                        </para>
                     </listitem>
                 </varlistentry>
                 <varlistentry>
@@ -1082,7 +1040,7 @@ fallback_homedir = /home/%u
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>default_shell</term>
+                    <term>default_shell (string)</term>
                     <listitem>
                         <para>
                             The default shell to use if the provider does
@@ -1271,16 +1229,26 @@ fallback_homedir = /home/%u
                             <quote>password</quote> field.
                         </para>
                         <para>
+                            This option can also be set per-domain, which
+                            overwrites the value in the <quote>[nss]</quote>
+                            section for that domain. This is particularly useful
+                            when using a proxy domain with
+                            <option>proxy_lib_name=files</option> and a
+                            <option>proxy_pam_target</option> other than
+                            <quote>sssd-shadowutils</quote>. In that case, SSSD
+                            returns <quote>*</quote> for the password field by
+                            default, which causes <command>pam_unix</command> to
+                            treat all accounts as locked. Setting
+                            <option>pwfield = x</option> in the domain section
+                            restores the expected behavior.
+                        </para>
+                        <para>
                             Default: <quote>*</quote>
                         </para>
                         <para>
-                            Note: This option can also be set per-domain which
-                            overwrites the value in [nss] section.
-                        </para>
-                        <para>
-                            Default: <quote>not set</quote> (remote domains),
-                            <quote>x</quote> (proxy domain with nss_files
-                            and sssd-shadowutils target)
+                            Default (per-domain): <quote>not set</quote> (remote
+                            domains), <quote>x</quote> (proxy domain with
+                            nss_files and sssd-shadowutils target)
                         </para>
                     </listitem>
                 </varlistentry>
@@ -1290,7 +1258,8 @@ fallback_homedir = /home/%u
             <title>PAM configuration options</title>
             <para>
                 These options can be used to configure the
-                Pluggable Authentication Module (PAM) service.
+                Pluggable Authentication Module (PAM) service and should be
+                specified under the <quote>[pam]</quote> section.
             </para>
             <variablelist>
                 <varlistentry>
@@ -1582,7 +1551,7 @@ pam_account_locked_message = Account locked, please contact help desk.
                     </listitem>
                 </varlistentry>
                 <varlistentry condition="build_passkey">
-                    <term>pam_passkey_auth (bool)</term>
+                    <term>pam_passkey_auth (boolean)</term>
                     <listitem>
                         <para>
                             Enable passkey device based authentication.
@@ -1593,7 +1562,7 @@ pam_account_locked_message = Account locked, please contact help desk.
                     </listitem>
                 </varlistentry>
                 <varlistentry condition="build_passkey">
-                    <term>passkey_debug_libfido2 (bool)</term>
+                    <term>passkey_debug_libfido2 (boolean)</term>
                     <listitem>
                         <para>
                             Enable libfido2 library debug messages.
@@ -1604,7 +1573,7 @@ pam_account_locked_message = Account locked, please contact help desk.
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>pam_cert_auth (bool)</term>
+                    <term>pam_cert_auth (boolean)</term>
                     <listitem>
                         <para>
                             Enable certificate based Smartcard authentication.
@@ -1614,6 +1583,31 @@ pam_account_locked_message = Account locked, please contact help desk.
                         </para>
                         <para>
                             Default: False
+                        </para>
+                        <para>
+                            Note: In case OpenSC is used for Smartcard access
+                            SSSD supports the filesystem caching in OpenSC when
+                            enabled in opensc.conf. The cached files are located
+                            in a common <quote>opensc</quote> directory in SSSD's state directory.
+                            The behaviour can be changed in opensc.conf
+                        </para>
+                        <para>
+                            Example opensc.conf (*):
+                            <programlisting>
+app /usr/libexec/sssd/p11_child {
+        framework pkcs15 {
+                use_file_caching = no;
+        }
+}
+app /usr/libexec/sssd/krb5_child {
+        framework pkcs15 {
+                use_file_caching = no;
+        }
+}
+                            </programlisting>
+                        </para>
+                        <para>
+                            (*) The actual <quote>libexec</quote> directory for p11_child and krb5_child depends on the distribution.
                         </para>
                     </listitem>
                 </varlistentry>
@@ -1829,7 +1823,7 @@ p11_uri = pkcs11:library-description=OpenSC%20smartcard%20framework;slot-id=2
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>pam_initgroups_scheme</term>
+                    <term>pam_initgroups_scheme (string)</term>
                     <listitem>
                         <para>
                             The PAM responder can force an online lookup to get
@@ -1861,7 +1855,7 @@ p11_uri = pkcs11:library-description=OpenSC%20smartcard%20framework;slot-id=2
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>pam_gssapi_services</term>
+                    <term>pam_gssapi_services (string)</term>
                     <listitem>
                         <para>
                             Comma separated list of PAM services that are
@@ -1890,7 +1884,7 @@ pam_gssapi_services = sudo, sudo-i
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>pam_gssapi_check_upn</term>
+                    <term>pam_gssapi_check_upn (boolean)</term>
                     <listitem>
                         <para>
                             If True, SSSD will require that the Kerberos user
@@ -1900,8 +1894,8 @@ pam_gssapi_services = sudo, sudo-i
                             fails.
                         </para>
                         <para>
-                            If False, every user that is able to obtained
-                            required service ticket will be authenticated.
+                            If False, every user that is able to obtain
+                            a required service ticket will be authenticated.
                         </para>
                         <para>
                             Note: This option can also be set per-domain which
@@ -1915,7 +1909,7 @@ pam_gssapi_services = sudo, sudo-i
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>pam_gssapi_indicators_map</term>
+                    <term>pam_gssapi_indicators_map (string)</term>
                     <listitem>
                         <para>
                            Comma separated list of authentication indicators required
@@ -1982,7 +1976,7 @@ pam_gssapi_indicators_map = sudo:pkinit, sudo-i:pkinit
                     </listitem>
                 </varlistentry>
                 <varlistentry condition="with_samba">
-                    <term>pam_gssapi_indicators_apply</term>
+                    <term>pam_gssapi_indicators_apply (string)</term>
                     <listitem>
                         <para>
                             Comma separated list of triples to assign
@@ -2047,7 +2041,10 @@ pam_json_services = gdm-switchable-auth
         <refsect2 id='SUDO' condition="with_sudo">
             <title>SUDO configuration options</title>
             <para>
-                These options can be used to configure the sudo service.
+                These options can be used to configure the sudo service
+                and should be specified under the <quote>[sudo]</quote> section.
+            </para>
+            <para>
                 The detailed instructions for configuration of
                 <citerefentry>
                     <refentrytitle>sudo</refentrytitle>
@@ -2064,7 +2061,7 @@ pam_json_services = gdm-switchable-auth
             </para>
             <variablelist>
                 <varlistentry>
-                    <term>sudo_timed (bool)</term>
+                    <term>sudo_timed (boolean)</term>
                     <listitem>
                         <para>
                             Whether or not to evaluate the sudoNotBefore
@@ -2103,7 +2100,9 @@ pam_json_services = gdm-switchable-auth
         <refsect2 id='AUTOFS' condition="with_autofs">
             <title>AUTOFS configuration options</title>
             <para>
-                These options can be used to configure the autofs service.
+                These options can be used to configure the autofs service
+                and should be specified under the <quote>[autofs]</quote>
+                section.
             </para>
             <variablelist>
                 <varlistentry>
@@ -2128,11 +2127,13 @@ pam_json_services = gdm-switchable-auth
         <refsect2 id='SSH' condition="with_ssh">
             <title>SSH configuration options</title>
             <para>
-                These options can be used to configure the SSH service.
+                These options can be used to configure the SSH service
+                and should be specified under the <quote>[ssh]</quote>
+                section.
             </para>
             <variablelist>
                 <varlistentry>
-                    <term>ssh_use_certificate_keys (bool)</term>
+                    <term>ssh_use_certificate_keys (boolean)</term>
                     <listitem>
                         <para>
                             If set to true the
@@ -2235,7 +2236,8 @@ pam_json_services = gdm-switchable-auth
                 </itemizedlist>
             </para>
             <para>
-                These options can be used to configure the PAC responder.
+                These options can be used to configure the PAC responder
+                and should be specified under the <quote>[pac]</quote> section.
             </para>
             <variablelist>
                 <varlistentry>
@@ -2415,7 +2417,16 @@ pam_json_services = gdm-switchable-auth
                 </citerefentry>.
             </para>
             <para>
-                These options can be used to configure session recording.
+                These options can be used to configure session recording
+                and should be specified under the
+                <quote>[session_recording]</quote> section.
+            </para>
+            <para>
+            Note: Unlike other sections, the <quote>[session_recording]</quote>
+            section ignores <replaceable>debug*</replaceable> options and suitable
+            <replaceable>debug*</replaceable> options must be set in
+            <quote>[pam]</quote>, <quote>[nss]</quote> and
+            <quote>[domain/<replaceable>NAME</replaceable>]</quote> sections.
             </para>
             <variablelist>
                 <varlistentry>
@@ -2540,7 +2551,7 @@ pam_json_services = gdm-switchable-auth
             <quote>[domain/<replaceable>NAME</replaceable>]</quote>
             <variablelist>
                 <varlistentry>
-                    <term>enabled</term>
+                    <term>enabled (boolean)</term>
                     <listitem>
                         <para>
                             Explicitly enable or disable the domain. If
@@ -2617,7 +2628,7 @@ pam_json_services = gdm-switchable-auth
                 </varlistentry>
 
                 <varlistentry>
-                    <term>enumerate (bool)</term>
+                    <term>enumerate (boolean)</term>
                     <listitem>
                         <para>
                             Determines if a domain can be enumerated,
@@ -2821,14 +2832,93 @@ pam_json_services = gdm-switchable-auth
                 </varlistentry>
 
                 <varlistentry>
-                    <term>entry_cache_computer_timeout (integer)</term>
+                    <term>offline_timeout (integer)</term>
                     <listitem>
                         <para>
-                            How many seconds to keep the local computer
-                            entry before asking the backend again
+                            When SSSD switches to offline mode the amount of
+                            time before it tries to go back online will
+                            increase based upon the time spent disconnected.
+                            By default SSSD uses incremental behaviour to
+                            calculate delay in between retries.
+                            So, the wait time for a given retry will be longer
+                            than the wait time for the previous ones.
+                            After each unsuccessful attempt to go online,
+                            the new interval is recalculated by the following:
                         </para>
                         <para>
-                            Default: entry_cache_timeout
+                             new_delay = Minimum(old_delay * 2, offline_timeout_max) + random[0...offline_timeout_random_offset]
+                        </para>
+                        <para>
+                            The offline_timeout default value is 60.
+                            The offline_timeout_max default value is 3600.
+                            The offline_timeout_random_offset default value is 30.
+                            The end result is the number of seconds before next retry.
+                        </para>
+                        <para>
+                            Note that the maximum length of each interval
+                            is defined by offline_timeout_max (apart from the random part).
+                        </para>
+                        <para>
+                            Default: 60
+                        </para>
+                    </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                    <term>offline_timeout_max (integer)</term>
+                    <listitem>
+                        <para>
+                            Controls by how much the time between attempts to go
+                            online can be incremented following unsuccessful
+                            attempts to go online.
+                        </para>
+                        <para>
+                            A value of 0 disables the incrementing behaviour.
+                        </para>
+                        <para>
+                            The value of this parameter should be set in correlation
+                            to offline_timeout parameter value.
+                        </para>
+                        <para>
+                            With offline_timeout set to 60 (default value) there is no point
+                            in setting offline_timeout_max to less than 120 as it will
+                            saturate instantly. General rule here should be to set
+                            offline_timeout_max to at least 4 times offline_timeout.
+                        </para>
+                        <para>
+                            Although a value between 0 and offline_timeout may be
+                            specified, it has the effect of overriding the
+                            offline_timeout value so is of little use.
+                        </para>
+                        <para>
+                            Default: 3600
+                        </para>
+                    </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                    <term>offline_timeout_random_offset (integer)</term>
+                    <listitem>
+                        <para>
+                            When SSSD is in offline mode it keeps probing
+                            backend servers in specified time intervals:
+                        </para>
+                        <para>
+                            new_delay = Minimum(old_delay * 2, offline_timeout_max) + random[0...offline_timeout_random_offset]
+                        </para>
+                        <para>
+                            This parameter controls the value of the random offset
+                            used for the above equation. Final random_offset value
+                            will be random number in range:
+                        </para>
+                        <para>
+                            [0 - offline_timeout_random_offset]
+                        </para>
+                        <para>
+                            A value of 0 disables the random offset addition.
+                        </para>
+                        <para>
+                            Default: 30
                         </para>
                     </listitem>
                 </varlistentry>
@@ -2877,7 +2967,7 @@ pam_json_services = gdm-switchable-auth
                 </varlistentry>
 
                 <varlistentry>
-                    <term>cache_credentials (bool)</term>
+                    <term>cache_credentials (boolean)</term>
                     <listitem>
                         <para>
                             Determines if user credentials are also cached
@@ -3007,11 +3097,16 @@ pam_json_services = gdm-switchable-auth
                                 <manvolnum>5</manvolnum>
                             </citerefentry> for more information.
                         </para>
+                        <para>
+                            Default: Not set (This is a mandatory setting that
+                            must be explicitly defined for each configured
+                            domain).
+                        </para>
                     </listitem>
                 </varlistentry>
 
                 <varlistentry>
-                    <term>use_fully_qualified_names (bool)</term>
+                    <term>use_fully_qualified_names (boolean)</term>
                     <listitem>
                         <para>
                             Use the full name and domain (as formatted by
@@ -3041,7 +3136,7 @@ pam_json_services = gdm-switchable-auth
                     </listitem>
                 </varlistentry>
                 <varlistentry>
-                    <term>ignore_group_members (bool)</term>
+                    <term>ignore_group_members (boolean)</term>
                     <listitem>
                         <para>
                             Do not return group members for group lookups.
@@ -3330,8 +3425,9 @@ pam_json_services = gdm-switchable-auth
                             <quote>none</quote> disallows fetching selinux settings explicitly.
                         </para>
                         <para>
-                            Default: <quote>id_provider</quote> is used if it
-                            is set and can handle selinux loading requests.
+                            Default: the value of <quote>id_provider</quote> is used if it
+                            is set and can handle selinux loading requests. Otherwise the
+                            result is the same as if the selinux_provider is set to none.
                         </para>
                     </listitem>
                 </varlistentry>
@@ -3633,9 +3729,9 @@ pam_json_services = gdm-switchable-auth
                     <term>dns_resolver_server_timeout (integer)</term>
                     <listitem>
                         <para>
-                            Defines the amount of time (in milliseconds)
-                            SSSD would try to talk to DNS server before
-                            trying next DNS server.
+                            Defines the timeout duration (in milliseconds)
+                            SSSD waits for a DNS server to respond before
+                            moving to the next one.
                         </para>
                         <para>
                             The AD provider will use this option for the
@@ -3643,8 +3739,24 @@ pam_json_services = gdm-switchable-auth
                         </para>
                         <para>
                             Please see the section <quote>FAILOVER</quote>
-                            for more information about the service
-                            resolution.
+                            in
+                            <citerefentry>
+                                <refentrytitle>sssd-ldap</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry>,
+                            <citerefentry>
+                                <refentrytitle>sssd-krb5</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry>,
+                            <citerefentry>
+                                <refentrytitle>sssd-ipa</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                           </citerefentry> or
+                            <citerefentry>
+                                <refentrytitle>sssd-ad</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry> for more information about the
+                            service resolution.
                         </para>
                         <para>
                             Default: 1000
@@ -3663,8 +3775,24 @@ pam_json_services = gdm-switchable-auth
                         </para>
                         <para>
                             Please see the section <quote>FAILOVER</quote>
-                            for more information about the service
-                            resolution.
+                            in
+                            <citerefentry>
+                                <refentrytitle>sssd-ldap</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry>,
+                            <citerefentry>
+                                <refentrytitle>sssd-krb5</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry>,
+                            <citerefentry>
+                                <refentrytitle>sssd-ipa</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry> or
+                            <citerefentry>
+                                <refentrytitle>sssd-ad</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry> for more information about the
+                            service resolution.
                         </para>
                         <para>
                             Default: 3
@@ -3684,8 +3812,24 @@ pam_json_services = gdm-switchable-auth
                         </para>
                         <para>
                             Please see the section <quote>FAILOVER</quote>
-                            for more information about the service
-                            resolution.
+                            in
+                            <citerefentry>
+                                <refentrytitle>sssd-ldap</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry>,
+                            <citerefentry>
+                                <refentrytitle>sssd-krb5</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry>,
+                            <citerefentry>
+                                <refentrytitle>sssd-ipa</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry> or
+                            <citerefentry>
+                                <refentrytitle>sssd-ad</refentrytitle>
+                                <manvolnum>5</manvolnum>
+                            </citerefentry> for more information about the
+                            service resolution.
                         </para>
                         <para>
                             Default: 6
@@ -3694,7 +3838,7 @@ pam_json_services = gdm-switchable-auth
                 </varlistentry>
 
                 <varlistentry>
-                    <term>dns_resolver_use_search_list (bool)</term>
+                    <term>dns_resolver_use_search_list (boolean)</term>
                     <listitem>
                         <para>
                             Normally, the DNS resolver searches the domain
@@ -3750,7 +3894,12 @@ pam_json_services = gdm-switchable-auth
                     <term>override_gid (integer)</term>
                     <listitem>
                         <para>
-                            Override the primary GID value with the one specified.
+                            Override the primary GID value for all users in the
+                            domain with specified value.
+                        </para>
+                        <para>
+                            Default: not set (Use the primary GID value retrieved
+                            from the identity provider)
                         </para>
                     </listitem>
                 </varlistentry>
@@ -3944,12 +4093,11 @@ subdomain_inherit = ldap_purge_cache_timeout
                     <term>cached_auth_timeout (int)</term>
                     <listitem>
                         <para>
-                            Specifies time in seconds since last successful
-                            online authentication for which user will be
-                            authenticated using cached credentials while
-                            SSSD is in the online mode. If the credentials
-                            are incorrect, SSSD falls back to online
-                            authentication.
+                            Specifies the number of seconds since the last successful
+                            online authentication during which SSSD will authenticate
+                            users via cached credentials, even while online.
+                            If the cached authentication fails, SSSD immediately
+                            falls back to online authentication.
                         </para>
                         <para>
                             This option's value is inherited by all trusted
@@ -4587,6 +4735,50 @@ ldap_user_extra_attrs = phone:telephoneNumber
                         <term>interactive_prompt</term>
                         <listitem>
                             <para>to change the message of the interactive prompt.
+                            </para>
+                        </listitem>
+                    </varlistentry>
+                    </variablelist>
+                    </para>
+                </listitem>
+            </varlistentry>
+        </variablelist>
+        <variablelist>
+            <varlistentry>
+                <term>[prompting/cert_auth]</term>
+                <listitem>
+                    <para>to configure Smartcard authentication prompting,
+                    allowed options are:
+                    <variablelist>
+                    <varlistentry>
+                        <term>pin_prompt</term>
+                        <listitem>
+                            <para>to change the message which asks the user to
+                                  enter the PIN at the computer keyboard. At
+                                  the end of the message the token name is
+                                  printed.
+                            </para>
+                        </listitem>
+                    </varlistentry>
+                    <varlistentry>
+                        <term>keypad_prompt</term>
+                        <listitem>
+                            <para>to change the message which asks the user to
+                                  enter the PIN at keypad of the Smartcard
+                                  reader. At the end of the message the token
+                                  name is printed.
+                            </para>
+                        </listitem>
+                    </varlistentry>
+                    <varlistentry>
+                        <term>user_name_hint</term>
+                        <listitem>
+                            <para>boolean value, if True ask for a user name
+                                  if no name was given before and the found
+                                  certificate can be mapped to more than one
+                                  user.
+                            </para>
+                            <para>Default: False
                             </para>
                         </listitem>
                     </varlistentry>

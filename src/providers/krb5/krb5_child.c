@@ -40,6 +40,7 @@
 #include "util/find_uid.h"
 #include "util/sss_chain_id.h"
 #include "util/sss_ptr_hash.h"
+#include "util/client_envs.h"
 #include "src/util/util_errors.h"
 #include "providers/backend.h"
 #include "providers/krb5/krb5_auth.h"
@@ -1054,8 +1055,14 @@ static krb5_error_code answer_idp_oauth2(krb5_context kctx,
         goto done;
     }
 
-    if (strlen(data->user_code) != token_len && strcmp(data->user_code, token) != 0) {
-        DEBUG(SSSDBG_OP_FAILURE, "User code do not match!\n");
+    if (data == NULL || data->user_code == NULL || token == NULL) {
+        DEBUG(SSSDBG_OP_FAILURE, "OAuth2 data, user code, or token is missing!\n");
+        kerr = EINVAL;
+        goto done;
+    }
+
+    if (strlen(data->user_code) != token_len || strcmp(data->user_code, token) != 0) {
+        DEBUG(SSSDBG_OP_FAILURE, "User code does not match!\n");
         kerr = EINVAL;
         goto done;
     }
@@ -4221,8 +4228,7 @@ static krb5_error_code privileged_krb5_setup(struct krb5_req *kr,
         k5c_ccache_check(kr, offline);
     }
 
-    if (!(offline ||
-            (kr->fast_val == K5C_FAST_NEVER && kr->validate == false))) {
+    if (!(kr->fast_val == K5C_FAST_NEVER && kr->validate == false)) {
         /* A Keytab is not used if fast with anonymous pkinit is used (and validate is false)*/
         if (!(kr->cli_opts->fast_use_anonymous_pkinit == true && kr->validate == false)) {
             sss_set_cap_effective(CAP_DAC_READ_SEARCH, true);
@@ -4238,7 +4244,7 @@ static krb5_error_code privileged_krb5_setup(struct krb5_req *kr,
             kr->keytab = mem_keytab;
         }
 
-        if (kr->fast_val != K5C_FAST_NEVER) {
+        if (!offline && kr->fast_val != K5C_FAST_NEVER) {
             kerr = k5c_setup_fast(kr, kr->fast_val == K5C_FAST_DEMAND);
             if (kerr != EOK) {
                 DEBUG(SSSDBG_OP_FAILURE, "Cannot set up FAST\n");
@@ -4295,6 +4301,7 @@ int main(int argc, const char *argv[])
     struct cli_opts cli_opts = { 0 };
     int sss_creds_password = 0;
     long dummy_long = 0;
+    char *set_env = NULL;
 
     /* Don't touch PR_SET_DUMPABLE as 'krb5_child' handles host keytab.
      * Rely on system settings instead: this flag "is reset to the
@@ -4324,6 +4331,8 @@ int main(int argc, const char *argv[])
          0, _("Use custom version of krb5_get_init_creds_password"), NULL},
         {CHILD_OPT_CHECK_PAC, 0, POPT_ARG_LONG, &dummy_long, 0,
          _("Check PAC flags"), NULL},
+        {CHILD_OPT_SET_ENV, 0, POPT_ARG_STRING, &set_env, 'e',
+         _("Set environment variable (KEY=VALUE)"), NULL},
         POPT_TABLEEND
     };
 
@@ -4341,6 +4350,21 @@ int main(int argc, const char *argv[])
             break;
         case 'C':
             cli_opts.canonicalize = true;
+            break;
+        case 'e':
+            if (set_env != NULL && strchr(set_env, '=') != NULL) {
+                char *env = set_env;
+                char *val = strchr(set_env, '=');
+                *val = '\0';
+                val++;
+                if (!is_client_env_allowed(env)) {
+                    fprintf(stderr, "\nEnvironment variable '%s' is not allowed\n\n", env);
+                    poptPrintUsage(pc, stderr, 0);
+                    _exit(-1);
+                }
+                setenv(env, val, 1);
+                set_env = NULL;
+            }
             break;
         default:
         fprintf(stderr, "\nInvalid option %s: %s\n\n",
@@ -4403,6 +4427,17 @@ int main(int argc, const char *argv[])
     }
 
     sss_drop_all_caps();
+
+    /* In case of smartcard setup caching.
+     * OpenSC benefits from this by a factor of 10. */
+    if (IS_SC_AUTHTOK(kr->pd->authtok)) {
+        ret = setenv("XDG_CACHE_HOME", SSS_STATEDIR, 1);
+        if (ret != 0) {
+            /* Log, but do not abort -- authentication can (slower) continue. */
+            DEBUG(SSSDBG_MINOR_FAILURE,
+                  "Cannot set XDG_CACHE_HOME (%s).\n", strerror(errno));
+        }
+    }
 
     /* For PKINIT we might need access to the pcscd socket which by default
      * is only allowed for authenticated users. Since PKINIT is part of

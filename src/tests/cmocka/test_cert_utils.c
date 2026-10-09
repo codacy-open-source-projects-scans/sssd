@@ -32,6 +32,9 @@
 #include "tests/cmocka/common_mock.h"
 #include "util/crypto/sss_crypto.h"
 #include "responder/ssh/ssh_private.h"
+#ifdef BUILD_OIDC_CHILD
+#include "oidc_child/oidc_child_util.h"
+#endif
 
 #ifdef HAVE_TEST_CA
 #include "tests/test_CA/SSSD_test_cert_pubsshkey_0001.h"
@@ -42,6 +45,8 @@
 #include "tests/test_CA/SSSD_test_cert_x509_0007.h"
 #include "tests/test_ECC_CA/SSSD_test_ECC_cert_pubsshkey_0001.h"
 #include "tests/test_ECC_CA/SSSD_test_ECC_cert_x509_0001.h"
+#include "tests/test_CA/SSSD_test_cert_pkcs12_0001.h"
+#include "tests/test_ECC_CA/SSSD_test_ECC_cert_pkcs12_0001.h"
 #else
 #define SSSD_TEST_CERT_0001 ""
 #define SSSD_TEST_CERT_SSH_KEY_0001 ""
@@ -51,6 +56,8 @@
 #define SSSD_TEST_CERT_SSH_KEY_0007 ""
 #define SSSD_TEST_ECC_CERT_0001 ""
 #define SSSD_TEST_ECC_CERT_SSH_KEY_0001 ""
+#define SSSD_TEST_PKCS12_0001 ""
+#define SSSD_TEST_ECC_PKCS12_0001 ""
 #endif
 
 /* When run under valgrind with --trace-children=yes we have to increase the
@@ -825,6 +832,50 @@ void test_cert_to_ssh_2keys_with_certmap_2_send(void **state)
     talloc_free(ev);
 }
 
+#ifdef BUILD_OIDC_CHILD
+void test_get_jwk_from_pkcs12(void **state)
+{
+    int ret;
+    char *jwk = NULL;
+    uint8_t *pkcs12;
+    size_t pkcs12_size;
+    const char rsa_prefix[] = "{\"keys\":[{\"kty\":\"RSA\",";
+    const char ecc_prefix[] = "{\"keys\":[{\"kty\":\"EC\",";
+
+    struct test_state *ts = talloc_get_type_abort(*state, struct test_state);
+    assert_non_null(ts);
+    ts->done = false;
+
+    ret = get_jwk_from_pkcs12(ts, NULL, 0, NULL, &jwk);
+    assert_int_equal(ret, EINVAL);
+
+    pkcs12 = sss_base64_decode(ts, SSSD_TEST_PKCS12_0001, &pkcs12_size);
+    assert_non_null(pkcs12);
+
+    ret = get_jwk_from_pkcs12(ts, pkcs12, pkcs12_size, "123456", &jwk);
+    assert_int_equal(ret, EOK);
+    assert_non_null(jwk);
+    assert_true(strlen(jwk) > strlen(rsa_prefix));
+    assert_true(strncmp(jwk, rsa_prefix, strlen(rsa_prefix)) == 0);
+
+    talloc_free(pkcs12);
+    talloc_free(jwk);
+    jwk = NULL;
+
+    pkcs12 = sss_base64_decode(ts, SSSD_TEST_ECC_PKCS12_0001, &pkcs12_size);
+    assert_non_null(pkcs12);
+
+    ret = get_jwk_from_pkcs12(ts, pkcs12, pkcs12_size, "123456", &jwk);
+    assert_int_equal(ret, EOK);
+    assert_non_null(jwk);
+    assert_true(strlen(jwk) > strlen(ecc_prefix));
+    assert_true(strncmp(jwk, ecc_prefix, strlen(ecc_prefix)) == 0);
+
+    talloc_free(pkcs12);
+    talloc_free(jwk);
+}
+#endif
+
 int main(int argc, const char *argv[])
 {
     poptContext pc;
@@ -864,6 +915,10 @@ int main(int argc, const char *argv[])
                                         setup, teardown),
         cmocka_unit_test_setup_teardown(test_cert_to_ssh_2keys_with_certmap_2_send,
                                         setup, teardown),
+#ifdef BUILD_OIDC_CHILD
+        cmocka_unit_test_setup_teardown(test_get_jwk_from_pkcs12,
+                                        setup, teardown),
+#endif
 #endif
     };
 
@@ -885,8 +940,6 @@ int main(int argc, const char *argv[])
     DEBUG_CLI_INIT(debug_level);
 
     ret = cmocka_run_group_tests(tests, NULL, NULL);
-
-    CRYPTO_cleanup_all_ex_data(); /* to make Valgrind happy */
 
     return ret;
 }

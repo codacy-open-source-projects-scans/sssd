@@ -39,6 +39,7 @@ struct cert_auth_info {
     char *module_name;
     char *key_id;
     char *label;
+    bool has_protected_authentication_path;
     struct ldb_result *cert_user_objs;
     struct cert_auth_info *prev;
     struct cert_auth_info *next;
@@ -67,6 +68,11 @@ const char *sss_cai_get_key_id(struct cert_auth_info *i)
 const char *sss_cai_get_label(struct cert_auth_info *i)
 {
     return i != NULL ? i->label : NULL;
+}
+
+bool sss_cai_get_has_protected_authentication_path(struct cert_auth_info *i)
+{
+    return i != NULL ? i->has_protected_authentication_path : false;
 }
 
 struct cert_auth_info *sss_cai_get_next(struct cert_auth_info *i)
@@ -660,6 +666,37 @@ static errno_t parse_p11_child_response(TALLOC_CTX *mem_ctx, uint8_t *buf,
         }
 
         if (pn == p) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Missing protected authentication path info in p11_child "
+                  "response.\n");
+            ret = EINVAL;
+            goto done;
+        }
+
+        if ((pn - p) == 4 && strncmp((char *) p, "true", 4) == 0) {
+            cert_auth_info->has_protected_authentication_path = true;
+        } else if ((pn - p) == 5 && strncmp((char *) p, "false", 5) == 0) {
+            cert_auth_info->has_protected_authentication_path = false;
+        } else {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Unexpected response where true/false was expected.\n");
+            ret = EINVAL;
+            goto done;
+        }
+        DEBUG(SSSDBG_TRACE_ALL, "Found protected authentication path [%s].\n",
+              cert_auth_info->has_protected_authentication_path ? "true"
+                                                                : "false");
+
+        p = ++pn;
+        pn = memchr(p, '\n', buf_len - (p - buf));
+        if (pn == NULL) {
+            DEBUG(SSSDBG_OP_FAILURE,
+                  "Missing new-line in p11_child response.\n");
+            ret = EINVAL;
+            goto done;
+        }
+
+        if (pn == p) {
             DEBUG(SSSDBG_OP_FAILURE, "Missing cert in p11_child response.\n");
             ret = EINVAL;
             goto done;
@@ -712,7 +749,7 @@ done:
 
 struct pam_check_cert_state {
     struct tevent_context *ev;
-    struct sss_certmap_ctx *sss_certmap_ctx;
+    struct pam_ctx *pctx;
     struct child_io_fds *io;
     struct cert_auth_info *cert_list;
     struct pam_data *pam_data;
@@ -726,7 +763,7 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
                                        const char *ca_db,
                                        time_t timeout,
                                        const char *verify_opts,
-                                       struct sss_certmap_ctx *sss_certmap_ctx,
+                                       struct pam_ctx *pctx,
                                        const char *uri,
                                        struct pam_data *pd)
 {
@@ -734,7 +771,8 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
     struct tevent_req *req;
     struct tevent_req *subreq;
     struct pam_check_cert_state *state;
-    const char *extra_args[22] = { NULL };
+    const char **extra_args = NULL;
+    size_t num_extra_args;
     uint8_t *write_buf = NULL;
     size_t write_buf_len = 0;
     size_t arg_c;
@@ -754,13 +792,26 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
-    if (sss_certmap_ctx == NULL) {
+    if (pctx == NULL || pctx->sss_certmap_ctx == NULL) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Missing certificate matching context.\n");
         ret = EINVAL;
         goto done;
     }
+    state->pctx = pctx;
 
     state->pam_data = pd;
+
+    num_extra_args = 22; /* base slots for existing args + NULL terminator */
+    if (pd->client_envs != NULL) {
+        for (size_t i = 0; pd->client_envs[i] != NULL; i++) {
+            num_extra_args += 2; /* --set-env + value */
+        }
+    }
+    extra_args = talloc_zero_array(state, const char *, num_extra_args);
+    if (extra_args == NULL) {
+        ret = ENOMEM;
+        goto done;
+    }
 
     /* extra_args are added in revers order */
     arg_c = 0;
@@ -842,11 +893,17 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
         goto done;
     }
 
+    if (pd->client_envs != NULL) {
+        for (size_t i = 0; pd->client_envs[i] != NULL; i++) {
+            extra_args[arg_c++] = pd->client_envs[i];
+            extra_args[arg_c++] = "--set-env";
+        }
+    }
+
     state->ev = ev;
-    state->sss_certmap_ctx = sss_certmap_ctx;
 
     ret = sss_child_start(state, ev,
-                          P11_CHILD_PATH, extra_args, false,
+                          P11_CHILD_PATH, extra_args, false, NULL,
                           P11_CHILD_LOG_FILE, STDOUT_FILENO,
                           NULL, NULL,
                           (unsigned)(timeout),
@@ -896,6 +953,7 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
     ret = EOK;
 
 done:
+    talloc_free(extra_args);
     if (ret != EOK) {
         tevent_req_error(req, ret);
         tevent_req_post(req, ev);
@@ -948,7 +1006,8 @@ static void p11_child_done(struct tevent_req *subreq)
 
     FD_CLOSE(state->io->read_from_child_fd);
 
-    ret = parse_p11_child_response(state, buf, buf_len, state->sss_certmap_ctx,
+    ret = parse_p11_child_response(state, buf, buf_len,
+                                   state->pctx->sss_certmap_ctx,
                                    &state->cert_list);
     if (ret != EOK) {
         if (ret == ERR_P11_PIN_LOCKED) {
@@ -1057,8 +1116,11 @@ static errno_t pack_cert_data(TALLOC_CTX *mem_ctx, const char *sysdb_username,
     size_t label_len;
     size_t prompt_len;
     size_t nss_name_len;
+    size_t has_pap_len;
     const char *username = "";
     const char *nss_username = "";
+    const char *has_protected_authentication_path;
+    size_t offset = 0;
 
     if (sysdb_username != NULL) {
         username = sysdb_username;
@@ -1066,6 +1128,12 @@ static errno_t pack_cert_data(TALLOC_CTX *mem_ctx, const char *sysdb_username,
 
     if (nss_name != NULL) {
         nss_username = nss_name;
+    }
+
+    if (sss_cai_get_has_protected_authentication_path(cert_info)) {
+        has_protected_authentication_path = "true";
+    } else {
+        has_protected_authentication_path = "false";
     }
 
     prompt = get_cert_prompt(mem_ctx, cert_info);
@@ -1085,10 +1153,11 @@ static errno_t pack_cert_data(TALLOC_CTX *mem_ctx, const char *sysdb_username,
     key_id_len = strlen(key_id) + 1;
     label_len = strlen(label) + 1;
     prompt_len = strlen(prompt) + 1;
-    nss_name_len = strlen(nss_username) +1;
+    nss_name_len = strlen(nss_username) + 1;
+    has_pap_len = strlen(has_protected_authentication_path) + 1;
 
     msg_len = user_len + token_len + module_len + key_id_len + label_len
-                       + prompt_len + nss_name_len;
+                       + prompt_len + nss_name_len + has_pap_len;
 
     msg = talloc_zero_size(mem_ctx, msg_len);
     if (msg == NULL) {
@@ -1097,18 +1166,23 @@ static errno_t pack_cert_data(TALLOC_CTX *mem_ctx, const char *sysdb_username,
         return ENOMEM;
     }
 
-    memcpy(msg, username, user_len);
-    memcpy(msg + user_len, token_name, token_len);
-    memcpy(msg + user_len + token_len, module_name, module_len);
-    memcpy(msg + user_len + token_len + module_len, key_id, key_id_len);
-    memcpy(msg + user_len + token_len + module_len + key_id_len,
-           label, label_len);
-    memcpy(msg + user_len + token_len + module_len + key_id_len + label_len,
-           prompt, prompt_len);
-    memcpy(msg + user_len + token_len + module_len + key_id_len + label_len
-               + prompt_len,
-           nss_username, nss_name_len);
+    safealign_memcpy(msg, username, user_len, &offset);
+    safealign_memcpy(msg + offset, token_name, token_len, &offset);
+    safealign_memcpy(msg + offset, module_name, module_len, &offset);
+    safealign_memcpy(msg + offset, key_id, key_id_len, &offset);
+    safealign_memcpy(msg + offset, label, label_len, &offset);
+    safealign_memcpy(msg + offset, prompt, prompt_len, &offset);
+    safealign_memcpy(msg + offset, nss_username, nss_name_len, &offset);
+    safealign_memcpy(msg + offset, has_protected_authentication_path,
+                     has_pap_len, &offset);
     talloc_free(prompt);
+    if (offset != msg_len) {
+        DEBUG(SSSDBG_OP_FAILURE,
+              "Expected [%zu] and copied [%zu] number of bytes do not match.\n",
+              msg_len, offset);
+        talloc_free(msg);
+        return EIO;
+    }
 
     if (_msg != NULL) {
         *_msg = msg;

@@ -500,15 +500,6 @@ static errno_t ipa_init_auth_ctx(TALLOC_CTX *mem_ctx,
     }
     ipa_options->auth_ctx->sdap_auth_ctx = sdap_auth_ctx;
 
-    setup_ldap_debug(sdap_auth_ctx->opts->basic);
-
-    ret = setup_tls_config(sdap_auth_ctx->opts->basic);
-    if (ret != EOK) {
-        DEBUG(SSSDBG_CRIT_FAILURE, "setup_tls_config failed [%d]: %s\n",
-              ret, sss_strerror(ret));
-        goto done;
-    }
-
     /* Initialize features needed by the krb5_child */
     ret = krb5_child_init(krb5_auth_ctx, be_ctx);
     if (ret != EOK) {
@@ -555,15 +546,6 @@ static errno_t ipa_init_misc(struct be_ctx *be_ctx,
     ret = ipa_init_dyndns(be_ctx, ipa_options);
     if (ret != EOK) {
         DEBUG(SSSDBG_CRIT_FAILURE, "Unable to init dyndns [%d]: %s\n",
-              ret, sss_strerror(ret));
-        return ret;
-    }
-
-    setup_ldap_debug(sdap_id_ctx->opts->basic);
-
-    ret = setup_tls_config(sdap_id_ctx->opts->basic);
-    if (ret != EOK) {
-        DEBUG(SSSDBG_CRIT_FAILURE, "Unable to get TLS options [%d]: %s\n",
               ret, sss_strerror(ret));
         return ret;
     }
@@ -704,15 +686,15 @@ errno_t sssm_ipa_id_init(TALLOC_CTX *mem_ctx,
 
     dp_set_method(dp_methods, DPM_ACCOUNT_HANDLER,
                   ipa_account_info_handler_send, ipa_account_info_handler_recv, id_ctx,
-                  struct ipa_id_ctx, struct dp_id_data, struct dp_reply_std);
+                  struct ipa_id_ctx, struct dp_id_data, dp_no_output);
 
     dp_set_method(dp_methods, DPM_CHECK_ONLINE,
                   sdap_online_check_handler_send, sdap_online_check_handler_recv, id_ctx->sdap_id_ctx,
-                  struct sdap_id_ctx, void, struct dp_reply_std);
+                  struct sdap_id_ctx, void, dp_no_output);
 
     dp_set_method(dp_methods, DPM_ACCT_DOMAIN_HANDLER,
                   default_account_domain_send, default_account_domain_recv, NULL,
-                  void, struct dp_get_acct_domain_data, struct dp_reply_std);
+                  void, struct dp_get_acct_domain_data, dp_no_output);
 
     return EOK;
 }

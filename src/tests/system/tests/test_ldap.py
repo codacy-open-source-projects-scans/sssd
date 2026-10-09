@@ -245,7 +245,7 @@ def test_ldap__search_base_is_discovered_and_defaults_to_root_dse(client: Client
     client.sssd.dom("test")["ldap_search_base"] = ldap.ldap.naming_context
 
     client.sssd.stop()
-    client.sssd.clear()
+    client.sssd.clear(logs=True)
     client.sssd.start()
 
     assert client.auth.ssh.password("puser1", "Secret123"), "User 'puser1' login failed!"
@@ -840,3 +840,271 @@ def test_ldap__resolver_provider_lookup_services_by_port(client: Client, ldap: L
         assert protocol in result.protocol, f"Service '{protocol}' was not found!"
     else:
         raise AssertionError("No service entry found!")
+
+
+@pytest.mark.importance("medium")
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__resolver_provider_lookup_service_when_port_is_out_range(client: Client, ldap: LDAP):
+    """
+    :title: Lookup a service when a port is out of range and the invalid port should not be returned using getent
+    :setup:
+        1. Create a service with port 1234567 (out of valid range)
+        2. Start SSSD
+    :steps:
+        1. Look up the service by name
+        2. Check SSSD domain log for port-range error
+    :expectedresults:
+        1. getent returns no result for the service
+        2. Log contains "Failed to identify service port" and "Numerical result out of range"
+    :customerscenario: False
+    """
+    ldap.services("svc_badport").add(port=1234567, protocol="udp", aliases=[])
+    client.sssd.start()
+
+    result = client.tools.getent.services("svc_badport", service="sss")
+    assert result is None, "Service with out-of-range port should not be returned!"
+
+    log = client.fs.read(client.sssd.logs.domain())
+    assert "Failed to identify service port" in log, "Expected port-out-of-range error in log!"
+    assert "Numerical result out of range" in log, "Expected 'Numerical result out of range' message in log!"
+
+
+@pytest.mark.importance("high")
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__resolver_provider_lookup_services_with_filtered_search_base(client: Client, ldap: LDAP):
+    """
+    :title: ldap_service_search_base with a protocol filter limits the returned services
+    :setup:
+        1. Create a TCP service
+        2. Create a UDP service
+        3. Configure ldap_service_search_base with a filter restricting to UDP protocol
+        4. Start SSSD
+    :steps:
+        1. Look up the UDP service
+        2. Look up the TCP service
+    :expectedresults:
+        1. UDP service is found
+        2. TCP service is not found (excluded by the filter)
+    :customerscenario: False
+    """
+    base = ldap.ldap.naming_context
+    ldap.services("svc_tcp").add(port=1234, protocol="tcp", aliases=[])
+    ldap.services("svc_udp").add(port=1234, protocol="udp", aliases=[])
+
+    client.sssd.dom("test")["ldap_service_search_base"] = f"ou=Services,{base}?one?(ipServiceProtocol=udp)"
+    client.sssd.start()
+
+    result = client.tools.getent.services("svc_udp", service="sss")
+    assert result is not None, "UDP service should be found with the protocol filter!"
+    assert result.name == "svc_udp"
+
+    result = client.tools.getent.services("svc_tcp", service="sss")
+    assert result is None, "TCP service should not be found with udp-only protocol filter!"
+
+
+@pytest.mark.importance("high")
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__resolver_provider_lookup_services_with_case_sensitivity_set_to_false(client: Client, ldap: LDAP):
+    """
+    :title: Service lookups succeed with mixed-case names and aliases when case_sensitive is false
+    :setup:
+        1. Create a service named "Svc1" with a mixed-case alias "SVC1_Alias1"
+        2. Configure SSSD with case_sensitive = false
+        3. Start SSSD
+    :steps:
+        1. Look up service using lowercase name "svc1"
+        2. Look up service using uppercase alias "svc1_alias1"
+        3. Look up service by port with mixed-case protocol "TCP"
+    :expectedresults:
+        1. Service is found regardless of case
+        2. Alias lookup succeeds regardless of case
+        3. Port/protocol lookup succeeds regardless of case
+    :customerscenario: False
+    """
+    ldap.services("Svc1").add(port=1234, protocol="tcp", aliases=["SVC1_Alias1"])
+
+    client.sssd.dom("test")["case_sensitive"] = "false"
+    client.sssd.start()
+
+    result = client.tools.getent.services("svc1", service="sss")
+    assert result is not None, "Service lookup should succeed with lowercase name when case_sensitive=false!"
+    assert result.port == 1234
+
+    result = client.tools.getent.services("svc1_alias1", service="sss")
+    assert result is not None, "Service alias lookup should succeed case-insensitively!"
+
+    result = client.tools.getent.services("1234/TCP", service="sss")
+    assert result is not None, "Service port/protocol lookup should succeed with uppercase protocol!"
+
+
+@pytest.mark.topology(KnownTopology.LDAP)
+@pytest.mark.parametrize("timeout, expect_expire", [(15, True), (0, True), (-100, True)])
+@pytest.mark.importance("medium")
+def test_ldap__connection_expire_timeout_releases_connection(
+    client: Client, ldap: LDAP, timeout: int, expect_expire: bool
+):
+    """
+    :title: LDAP connection is released after ldap_connection_expire_timeout
+    :setup:
+        1. Create user "user-1" and "user-2"
+        2. Set ldap_connection_expire_timeout to @timeout
+        3. Start SSSD
+    :steps:
+        1. Lookup user-1 to establish a connection
+        2. Wait for timeout to expire (or a short period for instant-expire values)
+        3. Lookup user-2 to trigger a new connection
+        4. Verify the connection was recycled by checking domain logs
+    :expectedresults:
+        1. User-1 is found
+        2. Timeout period passes
+        3. User-2 is found
+        4. Log contains "Connection is about to expire, releasing it" for positive timeouts,
+           or connection is instantly recycled for zero/negative values
+    :customerscenario: False
+    """
+    ldap.user("user-1").add()
+    ldap.user("user-2").add()
+    client.sssd.domain["ldap_connection_expire_timeout"] = str(timeout)
+    client.sssd.start()
+
+    result = client.tools.id("user-1")
+    assert result is not None, "user-1 not found!"
+
+    wait = timeout + 5 if timeout > 0 else 5
+    time.sleep(wait)
+
+    result = client.tools.id("user-2")
+    assert result is not None, "user-2 not found!"
+
+    if timeout > 0:
+        log = client.fs.read(client.sssd.logs.domain())
+        assert (
+            "Connection is about to expire, releasing it" in log
+        ), "Connection expire message not found in domain log!"
+
+
+@pytest.mark.topology(KnownTopology.LDAP)
+@pytest.mark.importance("medium")
+def test_ldap__connection_expire_timeout_out_of_range(client: Client, ldap: LDAP):
+    """
+    :title: SSSD rejects ldap_connection_expire_timeout value out of integer range
+    :setup:
+        1. Create user "user-1"
+        2. Set ldap_connection_expire_timeout to a value exceeding INT_MAX
+    :steps:
+        1. Start SSSD
+        2. Check domain log for "Numerical result out of range" error
+    :expectedresults:
+        1. SSSD starts but the domain may fail to initialize properly
+        2. Log contains the out-of-range error message
+    :customerscenario: False
+    """
+    ldap.user("user-1").add()
+    out_of_range = str(2**31)
+    client.sssd.domain["ldap_connection_expire_timeout"] = out_of_range
+    client.sssd.start(raise_on_error=False, check_config=False)
+
+    log = client.fs.read(client.sssd.logs.domain())
+    assert (
+        "Numerical result out of range" in log
+    ), "Expected 'Numerical result out of range' error not found in domain log!"
+
+
+@pytest.mark.topology(KnownTopology.LDAP)
+@pytest.mark.importance("low")
+def test_ldap__connection_expire_timeout_default_value_is_logged(client: Client, ldap: LDAP):
+    """
+    :title: Default ldap_connection_expire_timeout value (900) is logged at startup
+    :setup:
+        1. Create user "user-1"
+        2. Do not set ldap_connection_expire_timeout (use default)
+        3. Start SSSD
+    :steps:
+        1. Lookup user-1
+        2. Check domain log for the default timeout value
+    :expectedresults:
+        1. User is found
+        2. Log contains "Option ldap_connection_expire_timeout has value 900"
+    :customerscenario: False
+    """
+    ldap.user("user-1").add()
+    client.sssd.start()
+
+    result = client.tools.id("user-1")
+    assert result is not None, "user-1 not found!"
+
+    log = client.fs.read(client.sssd.logs.domain())
+    assert (
+        "Option ldap_connection_expire_timeout has value 900" in log
+    ), "Default ldap_connection_expire_timeout value (900) not found in domain log!"
+
+
+@pytest.mark.ticket(bz=748856)
+@pytest.mark.importance("medium")
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__display_password_expiration_warning(client: Client, ldap: LDAP):
+    """
+    :title: Display password expiration warning
+    :setup:
+        1. Set "passwordExp" to "on"
+        2. Set "passwordMaxAge" to "86400"
+        3. Set "passwordWarning" to "86400"
+        4. Add a user to LDAP
+        5. Start SSSD
+    :steps:
+        1. Authenticate as the user1 via 'su' with password "Secret123"
+        2. Check that user was informed about password expiration
+        3. Repeat the steps above with 'ssh' method
+    :expectedresults:
+        1. Authentication should succeed
+        2. Corresponding password expiration warning should be generated
+        3. Same results are expected for 'ssh' too
+    :customerscenario: False
+    """
+    ldap.ldap.modify("cn=config", replace={"passwordExp": "on", "passwordMaxAge": "86400", "passwordWarning": "86400"})
+    ldap.user("user1").add(password="Secret123")
+    client.sssd.start()
+
+    for method in ["su", "ssh"]:
+        rc, _, stdout, _ = client.auth.parametrize(method).password_with_output("user1", "Secret123")
+        assert rc == 0, "User 'user1' login failed!"
+        assert "Your password will expire in " in stdout, "Password expiration warning not generated!"
+
+
+@pytest.mark.importance("medium")
+@pytest.mark.ticket(bz=785908)
+@pytest.mark.topology(KnownTopology.LDAP)
+def test_ldap__search_base_limits_rfc2307bis_posixgroup_scope(client: Client, ldap: LDAP):
+    """
+    :title: ldap_search_base limits group scope for rfc2307bis and groupOfNames schema
+    :description:
+        When ldap_search_base is set, groups stored outside that base must not be resolved,
+        even when they are nested members of a group that is inside the base.
+    :setup:
+        1. Create groups inside and outside the configured ldap_search_base, nested across the boundary
+        2. Configure SSSD with rfc2307bis schema, groupOfNames object class and a limited ldap_search_base
+        3. Start SSSD
+    :steps:
+        1. Lookup groups that are inside the search base
+        2. Lookup groups that are outside the search base
+    :expectedresults:
+        1. Groups inside the search base are found
+        2. Groups outside the search base are not found
+    :customerscenario: True
+    :requirement: SSSD - Default debug level
+    """
+    outside_ou = ldap.ou("qagroup").add()
+    user = ldap.user("tempuser").add()
+
+    outside_group = ldap.group("outside_group", basedn=outside_ou, rfc2307bis=True).add(members=[user])
+    ldap.group("inside_group", rfc2307bis=True).add(members=[outside_group])
+
+    client.sssd.domain["ldap_schema"] = "rfc2307bis"
+    client.sssd.domain["ldap_group_object_class"] = "groupOfNames"
+    client.sssd.dom("test")["ldap_search_base"] = f"ou=groups,{ldap.ldap.naming_context}"
+    client.sssd.start()
+
+    assert client.tools.getent.group("inside_group") is not None, "inside_group was not found!"
+    assert (
+        client.tools.getent.group("outside_group") is None
+    ), "outside_group should not be visible outside search base!"
